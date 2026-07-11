@@ -169,7 +169,9 @@ at the top is red, something load-bearing broke.
   **withhold-results-on-debt gate**: when enabled, parents/students with an
   outstanding balance get HTTP 402 on report views until the invoice is settled.
   Endpoints under `/api/fees`: `categories`, `structures`, `invoices/generate`,
-  `invoices`, `payments`. Online gateway (Paystack webhook verification) lands
+  `invoices`, `payments`, `payments/{id}/receipt` (branded A5 PDF receipt), and
+  `summary` (bursar dashboard: expected vs collected vs outstanding, collection
+  rate, counts by status, ranked debtor list). Online gateway (Paystack webhook verification) lands
   when live keys are available.
 - **Sprint 4 — Attendance + Announcements ✅ (built)**: teachers mark a whole arm
   for a day in one call (upsert — corrections are audited old→new), daily register
@@ -177,6 +179,12 @@ at the top is red, something load-bearing broke.
   summary only. School-wide announcements targeted at role groups (all/teachers/
   parents/students) with drafts visible to admins only. Endpoints:
   `/api/attendance/{mark,register,summary}`, `/api/announcements`.
+- **Sprint 3b — Receipts + Bursar summary ✅ (built)**: per-payment A5 branded
+  receipt PDF (`GET /api/fees/payments/{id}/receipt`) showing the amount received
+  and the invoice position after it (paid to date, balance, status; sample in
+  `docs/sample_receipt.pdf`), and a one-look bursar dashboard
+  (`GET /api/fees/summary?term_id=`) with expected vs collected vs outstanding,
+  collection rate, counts by status, and a debtors list sorted by balance.
 - **Sprint 4b — Notifications ✅ (built)**: SMS with a provider abstraction —
   runs on a fully-logged mock with no keys (safe for dev/demo) and switches to
   live **Termii** by setting `TERMII_API_KEY` (+ `TERMII_SENDER_ID`); no code
