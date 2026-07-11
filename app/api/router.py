@@ -5,9 +5,9 @@ include it. `main.py` mounts this single aggregate router, nothing else.
 """
 from fastapi import APIRouter
 from app.api.routes import (
-    system, auth, schools, students, results, audit, imports,
+    system, auth, schools, students, results, audit, imports, fees,
 )
 
 api_router = APIRouter()
-for module in (system, auth, schools, students, results, audit, imports):
+for module in (system, auth, schools, students, results, audit, imports, fees):
     api_router.include_router(module.router)

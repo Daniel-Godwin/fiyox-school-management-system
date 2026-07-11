@@ -153,7 +153,17 @@ validation.
 - **Sprint 6 — Backbone ✅ (built)**: Alembic migrations (versioned schema, ready
   for Neon Postgres) and a pytest regression suite (20 tests covering auth, tenant
   isolation, RBAC, result math, audit, and import) with per-test isolated databases.
-- **Phase 2 (cont.) — Fees & Payments**: fee structures, invoices, Paystack, receipts, defaulter handling.
+- **Sprint 3 — Fees & Payments ✅ (built)**: fee categories, per-class/term fee
+  structures, one-click invoice generation for a whole arm (skip-safe on rerun),
+  payments (cash/transfer/POS/Paystack/Flutterwave) that are **idempotent by
+  reference** (a replayed webhook or double-click can never record money twice),
+  derived balances (never stored, never drift), automatic status transitions
+  (unpaid → part_paid → paid), full audit on invoices and payments, and the
+  **withhold-results-on-debt gate**: when enabled, parents/students with an
+  outstanding balance get HTTP 402 on report views until the invoice is settled.
+  Endpoints under `/api/fees`: `categories`, `structures`, `invoices/generate`,
+  `invoices`, `payments`. Online gateway (Paystack webhook verification) lands
+  when live keys are available.
 - **Phase 3 — Attendance, timetable, announcements, SMS/email (Termii/Africa's Talking).**
 - **Phase 4 — AI layer**: at-risk prediction, performance analytics, auto report-card
   comments (LLM), natural-language queries, OCR migration of old paper records.

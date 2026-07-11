@@ -11,6 +11,9 @@ from app.models.results import (
     AssessmentComponent, ScoreEntry, SubjectResult, TermResult,
 )
 from app.models.audit import AuditLog
+from app.models.fees import (
+    FeeCategory, FeeStructure, Invoice, Payment, InvoiceStatus, PaymentMethod,
+)
 
 __all__ = [
     "Base", "School", "User", "Role", "DEFAULT_GRADING",
@@ -19,4 +22,6 @@ __all__ = [
     "Student", "Enrollment", "Guardian", "TeachingAssignment", "Gender",
     "AssessmentComponent", "ScoreEntry", "SubjectResult", "TermResult",
     "AuditLog",
+    "FeeCategory", "FeeStructure", "Invoice", "Payment",
+    "InvoiceStatus", "PaymentMethod",
 ]

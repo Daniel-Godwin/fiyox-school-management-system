@@ -153,7 +153,24 @@ async def report_json(student_id: str, db: DbDep, user: CurrentUser,
     # parents/students only see published results
     if user.role in (Role.PARENT, Role.STUDENT) and not data["published"]:
         raise HTTPException(status_code=403, detail="Result not yet published")
+    await _enforce_debt_gate(db, user, school_id, student_id, term_id)
     return data
+
+
+async def _enforce_debt_gate(db, user: User, school_id: str,
+                             student_id: str, term_id: str) -> None:
+    """If the school withholds results on debt, block parents/students whose
+    invoice for this term still has a positive balance. Staff are never blocked."""
+    if user.role not in (Role.PARENT, Role.STUDENT):
+        return
+    from app.models.school import School
+    from app.services.fees import has_outstanding_debt
+    school = await db.get(School, school_id)
+    if school and school.withhold_results_on_debt:
+        if await has_outstanding_debt(db, school_id, student_id, term_id):
+            raise HTTPException(
+                status_code=402,
+                detail="Result withheld: outstanding school fees for this term")
 
 
 @router.get("/report/{student_id}/pdf", tags=["results"])
@@ -170,6 +187,7 @@ async def report_pdf(student_id: str, db: DbDep, user: CurrentUser,
         raise HTTPException(status_code=404, detail="No computed result for this term")
     if user.role in (Role.PARENT, Role.STUDENT) and not data["published"]:
         raise HTTPException(status_code=403, detail="Result not yet published")
+    await _enforce_debt_gate(db, user, school_id, student_id, term_id)
     pdf = build_report_pdf(data)
     fname = f"report_{student.admission_number.replace('/', '-')}_{data['term']['name']}.pdf"
     return StreamingResponse(BytesIO(pdf), media_type="application/pdf",

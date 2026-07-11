@@ -10,6 +10,10 @@ from app.schemas.student import StudentCreate, StudentOut
 from app.schemas.results import (
     ComponentIn, ComponentOut, ScoreRow, BulkScoresIn, ComputeIn, TermResultUpdate,
 )
+from app.schemas.fees import (
+    CategoryIn, CategoryOut, StructureIn, StructureOut,
+    GenerateInvoicesIn, InvoiceOut, PaymentIn, PaymentOut,
+)
 
 __all__ = [
     "Token", "LoginIn", "UserOut",
@@ -17,4 +21,6 @@ __all__ = [
     "StudentCreate", "StudentOut",
     "ComponentIn", "ComponentOut", "ScoreRow", "BulkScoresIn",
     "ComputeIn", "TermResultUpdate",
+    "CategoryIn", "CategoryOut", "StructureIn", "StructureOut",
+    "GenerateInvoicesIn", "InvoiceOut", "PaymentIn", "PaymentOut",
 ]
