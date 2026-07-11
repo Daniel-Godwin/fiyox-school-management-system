@@ -1,8 +1,8 @@
 # Fiyox School Management System
 
-A multi-tenant platform (Fiyox) that lets many Nigerian secondary schools move from paper to online. Formerly working-titled SchoolSuite/EduCore NG.
+![CI](https://github.com/Daniel-Godwin/fiyox-school-management-system/actions/workflows/ci.yml/badge.svg)
 
-A SaaS platform that lets **many** Nigerian secondary schools move from manual
+A multi-tenant SaaS platform that lets **many** Nigerian secondary schools move from manual
 paper records to an online system. One deployment serves every school; each
 school's data is strictly isolated.
 
@@ -126,8 +126,15 @@ pytest
 Each test runs against a fresh in-memory database seeded with one tenant, so the
 suite is isolated and fast. It covers the platform's load-bearing guarantees:
 authentication, multi-tenant isolation, RBAC, the result computation (exact
-totals, grades, positions), the audit trail (old→new capture), and bulk import
-validation.
+totals, grades, positions), the audit trail (old→new capture), bulk import
+validation, and the fees lifecycle (idempotent payments, debt gate).
+
+## Continuous integration
+
+Every push and pull request to `main` runs the full test suite on Python 3.11
+and 3.12, then verifies the Alembic migration chain applies and rolls back
+cleanly (`.github/workflows/ci.yml`). Green CI is the merge gate: if the badge
+at the top is red, something load-bearing broke.
 
 ## Roadmap
 - **Phase 1 — Result Engine ✅ (built)**: configurable assessment components
@@ -150,7 +157,7 @@ validation.
   tag. Endpoints: `GET /api/import/students/template`, `POST /api/import/students`
   (`?dry_run=true`, `?auto_create_classes=true`). This is the paper→Fiyox migration
   on-ramp and the future hook for OCR-based digitization of old registers.
-- **Sprint 6 — Backbone ✅ (built)**: Alembic migrations (versioned schema, ready
+- **Sprint 6 — Backbone ✅ (built)**: Alembic migrations, pytest suite, and GitHub Actions CI (tests on 3.11/3.12 + migration round-trip on every push). Alembic migrations (versioned schema, ready
   for Neon Postgres) and a pytest regression suite (20 tests covering auth, tenant
   isolation, RBAC, result math, audit, and import) with per-test isolated databases.
 - **Sprint 3 — Fees & Payments ✅ (built)**: fee categories, per-class/term fee
