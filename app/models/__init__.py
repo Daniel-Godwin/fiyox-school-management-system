@@ -14,6 +14,8 @@ from app.models.audit import AuditLog
 from app.models.fees import (
     FeeCategory, FeeStructure, Invoice, Payment, InvoiceStatus, PaymentMethod,
 )
+from app.models.attendance import Attendance, AttendanceStatus
+from app.models.communication import Announcement, AnnouncementTarget
 
 __all__ = [
     "Base", "School", "User", "Role", "DEFAULT_GRADING",
@@ -24,4 +26,6 @@ __all__ = [
     "AuditLog",
     "FeeCategory", "FeeStructure", "Invoice", "Payment",
     "InvoiceStatus", "PaymentMethod",
+    "Attendance", "AttendanceStatus",
+    "Announcement", "AnnouncementTarget",
 ]

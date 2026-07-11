@@ -14,6 +14,10 @@ from app.schemas.fees import (
     CategoryIn, CategoryOut, StructureIn, StructureOut,
     GenerateInvoicesIn, InvoiceOut, PaymentIn, PaymentOut,
 )
+from app.schemas.attendance import (
+    MarkRecord, MarkAttendanceIn, AttendanceRow, AttendanceSummary,
+)
+from app.schemas.communication import AnnouncementIn, AnnouncementOut
 
 __all__ = [
     "Token", "LoginIn", "UserOut",
@@ -23,4 +27,6 @@ __all__ = [
     "ComputeIn", "TermResultUpdate",
     "CategoryIn", "CategoryOut", "StructureIn", "StructureOut",
     "GenerateInvoicesIn", "InvoiceOut", "PaymentIn", "PaymentOut",
+    "MarkRecord", "MarkAttendanceIn", "AttendanceRow", "AttendanceSummary",
+    "AnnouncementIn", "AnnouncementOut",
 ]

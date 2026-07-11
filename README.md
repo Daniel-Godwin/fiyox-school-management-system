@@ -171,7 +171,13 @@ at the top is red, something load-bearing broke.
   Endpoints under `/api/fees`: `categories`, `structures`, `invoices/generate`,
   `invoices`, `payments`. Online gateway (Paystack webhook verification) lands
   when live keys are available.
-- **Phase 3 — Attendance, timetable, announcements, SMS/email (Termii/Africa's Talking).**
+- **Sprint 4 — Attendance + Announcements ✅ (built)**: teachers mark a whole arm
+  for a day in one call (upsert — corrections are audited old→new), daily register
+  view, per-student summaries with date ranges; parents can view their own ward's
+  summary only. School-wide announcements targeted at role groups (all/teachers/
+  parents/students) with drafts visible to admins only. Endpoints:
+  `/api/attendance/{mark,register,summary}`, `/api/announcements`.
+- **Phase 3 (remaining) — Timetable + SMS/email notifications (Termii/Africa's Talking).**
 - **Phase 4 — AI layer**: at-risk prediction, performance analytics, auto report-card
   comments (LLM), natural-language queries, OCR migration of old paper records.
 - **Phase 5 — Hardening**: Alembic migrations, Postgres Row-Level Security, audit logs, backups, monitoring.
