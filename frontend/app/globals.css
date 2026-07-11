@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+@theme {
+  /* Fiyox palette — ink navy authority, chalk-paper ground, ledger money-green */
+  --color-ink: #0b1f3a;
+  --color-ink-soft: #274264;
+  --color-paper: #f6f7f4;
+  --color-card: #ffffff;
+  --color-ledger: #1e7a4f;
+  --color-sanction: #b4232a;
+  --color-brass: #c8a24b;
+  --color-line: #dfe3da;
+
+  --font-display: "Space Grotesk", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, sans-serif;
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+}
+
+h1, h2, h3, .display {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+/* money and register columns line up like a ledger */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* signature: exercise-book ruled lines */
+.register-rules {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 27px,
+    var(--color-line) 27px,
+    var(--color-line) 28px
+  );
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-brass);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

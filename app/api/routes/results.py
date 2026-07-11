@@ -45,6 +45,25 @@ async def list_components(db: DbDep, user: CurrentUser):
 
 
 # ---------- Score entry (teacher / admin) ----------
+@router.get("/scores", tags=["results"])
+async def get_scores(
+    db: DbDep,
+    user: Annotated[User, Depends(require_roles(Role.TEACHER, Role.SCHOOL_ADMIN))],
+    arm_id: str = Query(...),
+    subject_id: str = Query(...),
+    term_id: str = Query(...),
+):
+    """Existing raw scores for one arm+subject+term — used to prefill the entry grid."""
+    school_id = tenant_scope(user)
+    rows = (await db.execute(select(ScoreEntry).where(
+        ScoreEntry.school_id == school_id,
+        ScoreEntry.arm_id == arm_id,
+        ScoreEntry.subject_id == subject_id,
+        ScoreEntry.term_id == term_id))).scalars().all()
+    return [{"student_id": r.student_id, "component_id": r.component_id,
+             "score": r.score} for r in rows]
+
+
 @router.post("/scores", tags=["results"])
 async def enter_scores(
     payload: BulkScoresIn, request: Request, db: DbDep,
@@ -96,6 +115,69 @@ async def compute(
 ):
     school_id = tenant_scope(user)
     return await compute_term(db, school_id, payload.arm_id, payload.term_id)
+
+
+# ---------- Class results listing (broadsheet-lite) ----------
+@router.get("/results", tags=["results"])
+async def list_results(
+    db: DbDep,
+    user: Annotated[User, Depends(require_roles(Role.TEACHER, Role.SCHOOL_ADMIN))],
+    arm_id: str = Query(...),
+    term_id: str = Query(...),
+):
+    """Computed term results for one arm, ranked — what a form teacher reviews
+    before publishing."""
+    school_id = tenant_scope(user)
+    results = (await db.execute(select(TermResult).where(
+        TermResult.school_id == school_id,
+        TermResult.arm_id == arm_id,
+        TermResult.term_id == term_id))).scalars().all()
+    students = {s.id: s for s in (await db.execute(select(Student).where(
+        Student.school_id == school_id))).scalars().all()}
+    rows = []
+    for tr in results:
+        st = students.get(tr.student_id)
+        rows.append({
+            "term_result_id": tr.id,
+            "student_id": tr.student_id,
+            "admission_number": st.admission_number if st else "",
+            "name": f"{st.first_name} {st.last_name}" if st else "Unknown",
+            "subjects_count": tr.subjects_count,
+            "grand_total": tr.grand_total,
+            "average": tr.average,
+            "position": tr.overall_position,
+            "class_size": tr.class_size,
+            "is_published": tr.is_published,
+        })
+    return sorted(rows, key=lambda r: r["position"])
+
+
+# ---------- Bulk publish (school admin) ----------
+@router.post("/results/publish", tags=["results"])
+async def publish_results(
+    payload: ComputeIn, request: Request, db: DbDep,
+    user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN))],
+):
+    """Publish every computed result for an arm+term in one action (each row audited)."""
+    school_id = tenant_scope(user)
+    ip = request.client.host if request.client else None
+    results = (await db.execute(select(TermResult).where(
+        TermResult.school_id == school_id,
+        TermResult.arm_id == payload.arm_id,
+        TermResult.term_id == payload.term_id))).scalars().all()
+    published = 0
+    for tr in results:
+        if not tr.is_published:
+            await record_audit(db, school_id=school_id, user_id=user.id,
+                               action="publish", table_name="term_results",
+                               record_id=tr.id,
+                               changes={"is_published": {"old": False, "new": True}},
+                               ip_address=ip)
+            tr.is_published = True
+            tr.updated_by = user.id
+            published += 1
+    await db.commit()
+    return {"published": published, "already_published": len(results) - published}
 
 
 # ---------- Edit term result: affective, comments, publish ----------

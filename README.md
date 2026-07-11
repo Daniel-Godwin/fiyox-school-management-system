@@ -194,6 +194,11 @@ at the top is red, something load-bearing broke.
   Endpoints: `/api/notifications/announcements/{id}/send`,
   `/api/notifications/fee-reminders`, `/api/notifications/logs`.
 - **Phase 3 (remaining) — Timetable; email channel + Africa's Talking as second SMS provider.**
+- **Sprint 7 — Frontend (started) ✅**: Next.js (App Router) + TypeScript + Tailwind
+  PWA in `frontend/` with a navy-and-brass "school register" identity. Login flow
+  against the OAuth2 endpoint, a protected role-aware dashboard shell (validates via
+  `/api/auth/me`), an overview, and a live students table. Builds clean (Next 16 /
+  React 19 / Tailwind v4) and is covered by a CI build job. See `frontend/README.md`.
 - **Phase 4 — AI layer**: at-risk prediction, performance analytics, auto report-card
   comments (LLM), natural-language queries, OCR migration of old paper records.
 - **Phase 5 — Hardening**: Alembic migrations, Postgres Row-Level Security, audit logs, backups, monitoring.
