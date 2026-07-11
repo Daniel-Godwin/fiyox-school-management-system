@@ -177,7 +177,15 @@ at the top is red, something load-bearing broke.
   summary only. School-wide announcements targeted at role groups (all/teachers/
   parents/students) with drafts visible to admins only. Endpoints:
   `/api/attendance/{mark,register,summary}`, `/api/announcements`.
-- **Phase 3 (remaining) — Timetable + SMS/email notifications (Termii/Africa's Talking).**
+- **Sprint 4b — Notifications ✅ (built)**: SMS with a provider abstraction —
+  runs on a fully-logged mock with no keys (safe for dev/demo) and switches to
+  live **Termii** by setting `TERMII_API_KEY` (+ `TERMII_SENDER_ID`); no code
+  change. Announcement blasts to the target role group, fee reminders that
+  message only the guardians of students with an outstanding balance (with the
+  exact amount), and a delivery log (`message_logs`) as proof of notice.
+  Endpoints: `/api/notifications/announcements/{id}/send`,
+  `/api/notifications/fee-reminders`, `/api/notifications/logs`.
+- **Phase 3 (remaining) — Timetable; email channel + Africa's Talking as second SMS provider.**
 - **Phase 4 — AI layer**: at-risk prediction, performance analytics, auto report-card
   comments (LLM), natural-language queries, OCR migration of old paper records.
 - **Phase 5 — Hardening**: Alembic migrations, Postgres Row-Level Security, audit logs, backups, monitoring.

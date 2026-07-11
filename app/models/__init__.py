@@ -16,6 +16,9 @@ from app.models.fees import (
 )
 from app.models.attendance import Attendance, AttendanceStatus
 from app.models.communication import Announcement, AnnouncementTarget
+from app.models.notifications import (
+    MessageLog, Channel, MessageStatus, MessagePurpose,
+)
 
 __all__ = [
     "Base", "School", "User", "Role", "DEFAULT_GRADING",
@@ -28,4 +31,5 @@ __all__ = [
     "InvoiceStatus", "PaymentMethod",
     "Attendance", "AttendanceStatus",
     "Announcement", "AnnouncementTarget",
+    "MessageLog", "Channel", "MessageStatus", "MessagePurpose",
 ]

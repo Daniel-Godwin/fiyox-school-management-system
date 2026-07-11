@@ -18,6 +18,7 @@ from app.schemas.attendance import (
     MarkRecord, MarkAttendanceIn, AttendanceRow, AttendanceSummary,
 )
 from app.schemas.communication import AnnouncementIn, AnnouncementOut
+from app.schemas.notifications import FeeReminderIn, MessageLogOut
 
 __all__ = [
     "Token", "LoginIn", "UserOut",
@@ -29,4 +30,5 @@ __all__ = [
     "GenerateInvoicesIn", "InvoiceOut", "PaymentIn", "PaymentOut",
     "MarkRecord", "MarkAttendanceIn", "AttendanceRow", "AttendanceSummary",
     "AnnouncementIn", "AnnouncementOut",
+    "FeeReminderIn", "MessageLogOut",
 ]

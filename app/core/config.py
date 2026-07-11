@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     # Nigerian integrations (filled in later phases)
     PAYSTACK_SECRET_KEY: str | None = None
     TERMII_API_KEY: str | None = None
+    TERMII_SENDER_ID: str = "Fiyox"
 
     @property
     def is_sqlite(self) -> bool:

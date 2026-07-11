@@ -44,7 +44,8 @@ async def _seed(TestSession) -> dict:
                     role=Role.SCHOOL_ADMIN, first_name="Amaka", last_name="Okoro"))
         db.add(User(school_id=school.id, email="teacher@gss-ikeja.ng",
                     hashed_password=hash_password("teach123"),
-                    role=Role.TEACHER, first_name="Tunde", last_name="Bello"))
+                    role=Role.TEACHER, first_name="Tunde", last_name="Bello",
+                    phone="+2348010000001"))
 
         session = AcademicSession(school_id=school.id, name="2025/2026", is_current=True)
         db.add(session)
