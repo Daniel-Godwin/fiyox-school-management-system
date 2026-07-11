@@ -101,6 +101,34 @@ step 1 and the installs automatically. To leave the environment later, type
 | Super admin  | owner@fiyox.ng    | owner123  |
 | School admin | admin@gss-ikeja.ng      | admin123  |
 
+## Database migrations (Alembic)
+
+Dev on SQLite auto-creates tables for convenience. For Postgres/production the
+schema is managed by versioned Alembic migrations (single source of truth is
+`DATABASE_URL`).
+
+```bash
+alembic upgrade head                          # apply all migrations
+alembic revision --autogenerate -m "add fees" # after adding/changing models
+alembic downgrade -1                          # roll back one migration
+```
+
+When you add a new model, register it in `app/models/__init__.py`, then
+autogenerate a migration and review it before committing.
+
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+Each test runs against a fresh in-memory database seeded with one tenant, so the
+suite is isolated and fast. It covers the platform's load-bearing guarantees:
+authentication, multi-tenant isolation, RBAC, the result computation (exact
+totals, grades, positions), the audit trail (old→new capture), and bulk import
+validation.
+
 ## Roadmap
 - **Phase 1 — Result Engine ✅ (built)**: configurable assessment components
   (Test 1/Test 2/Assignment/Exam), bulk score entry gated by role, computation
@@ -122,6 +150,9 @@ step 1 and the installs automatically. To leave the environment later, type
   tag. Endpoints: `GET /api/import/students/template`, `POST /api/import/students`
   (`?dry_run=true`, `?auto_create_classes=true`). This is the paper→Fiyox migration
   on-ramp and the future hook for OCR-based digitization of old registers.
+- **Sprint 6 — Backbone ✅ (built)**: Alembic migrations (versioned schema, ready
+  for Neon Postgres) and a pytest regression suite (20 tests covering auth, tenant
+  isolation, RBAC, result math, audit, and import) with per-test isolated databases.
 - **Phase 2 (cont.) — Fees & Payments**: fee structures, invoices, Paystack, receipts, defaulter handling.
 - **Phase 3 — Attendance, timetable, announcements, SMS/email (Termii/Africa's Talking).**
 - **Phase 4 — AI layer**: at-risk prediction, performance analytics, auto report-card
