@@ -13,7 +13,7 @@ from app.models.school import School, User, Role
 from app.models.academics import (
     AcademicSession, Term, SchoolClass, ClassArm, Subject, ClassCategory, TermName,
 )
-from app.models.student import Student, Gender
+from app.models.student import Student, Guardian, Gender
 from app.models.results import AssessmentComponent, ScoreEntry
 
 random.seed(42)
@@ -42,6 +42,11 @@ async def main():
                     hashed_password=hash_password("bursar123"),
                     role=Role.BURSAR, first_name="Chika", last_name="Nwosu",
                     phone="+2348010000009"))
+        parent = User(school_id=school.id, email="parent@gss-ikeja.ng",
+                      hashed_password=hash_password("parent123"),
+                      role=Role.PARENT, first_name="Mama", last_name="Chinedu",
+                      phone="+2348010000002")
+        db.add(parent)
 
         session = AcademicSession(school_id=school.id, name="2025/2026",
                                   is_current=True, start_date=date(2025, 9, 15))
@@ -91,6 +96,8 @@ async def main():
             db.add(st)
             students.append(st)
         await db.flush()
+        db.add(Guardian(school_id=school.id, parent_user_id=parent.id,
+                        student_id=students[0].id, relationship="Mother"))
 
         for st in students:
             for subj in subjects:
@@ -110,6 +117,7 @@ async def main():
         print("  Super admin: owner@fiyox.ng / owner123")
         print("  School admin: admin@gss-ikeja.ng / admin123")
         print("  Bursar: bursar@gss-ikeja.ng / bursar123")
+        print("  Parent (of Chinedu): parent@gss-ikeja.ng / parent123")
 
 
 if __name__ == "__main__":
