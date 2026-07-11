@@ -14,6 +14,8 @@ const NAV: { href: string; label: string; roles: User["role"][] }[] = [
     roles: ["super_admin", "school_admin", "teacher"] },
   { href: "/dashboard/results", label: "Results",
     roles: ["super_admin", "school_admin", "teacher"] },
+  { href: "/dashboard/fees", label: "Fees",
+    roles: ["super_admin", "school_admin", "bursar"] },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {

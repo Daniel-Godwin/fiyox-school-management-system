@@ -38,6 +38,10 @@ async def main():
         db.add(User(school_id=school.id, email="admin@gss-ikeja.ng",
                     hashed_password=hash_password("admin123"),
                     role=Role.SCHOOL_ADMIN, first_name="Amaka", last_name="Okoro"))
+        db.add(User(school_id=school.id, email="bursar@gss-ikeja.ng",
+                    hashed_password=hash_password("bursar123"),
+                    role=Role.BURSAR, first_name="Chika", last_name="Nwosu",
+                    phone="+2348010000009"))
 
         session = AcademicSession(school_id=school.id, name="2025/2026",
                                   is_current=True, start_date=date(2025, 9, 15))
@@ -105,6 +109,7 @@ async def main():
         print(f"STUDENT_ID={students[0].id}")
         print("  Super admin: owner@fiyox.ng / owner123")
         print("  School admin: admin@gss-ikeja.ng / admin123")
+        print("  Bursar: bursar@gss-ikeja.ng / bursar123")
 
 
 if __name__ == "__main__":
