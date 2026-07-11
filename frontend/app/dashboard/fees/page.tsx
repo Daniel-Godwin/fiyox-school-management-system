@@ -16,6 +16,8 @@ type Invoice = {
   discount: number; paid: number; balance: number; status: string;
 };
 type PayForm = { amount: string; method: string; reference: string };
+type Category = { id: string; name: string };
+type Structure = { id: string; class_id: string; term_id: string; category_id: string; amount: number };
 
 const ngn = (n: number) =>
   new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN", maximumFractionDigits: 2 }).format(n);
@@ -36,6 +38,13 @@ export default function FeesPage() {
   const [lastReceipt, setLastReceipt] = useState<Record<string, string>>({}); // invoice -> payment id
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  // fee setup
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [structures, setStructures] = useState<Structure[]>([]);
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [newCat, setNewCat] = useState("");
+  const [newStruct, setNewStruct] = useState({ class_id: "", category_id: "", amount: "" });
 
   useEffect(() => {
     Promise.all([
@@ -61,12 +70,16 @@ export default function FeesPage() {
   const load = useCallback(async () => {
     if (!termId) return;
     try {
-      const [sum, invs] = await Promise.all([
+      const [sum, invs, cats, structs] = await Promise.all([
         api<Summary>(`/api/fees/summary?term_id=${termId}`),
         api<Invoice[]>(`/api/fees/invoices?term_id=${termId}`),
+        api<Category[]>("/api/fees/categories"),
+        api<Structure[]>(`/api/fees/structures?term_id=${termId}`),
       ]);
       setSummary(sum);
       setInvoices(invs.sort((a, b) => b.balance - a.balance));
+      setCategories(cats);
+      setStructures(structs);
     } catch (e) {
       setNotice({
         kind: "err",
@@ -78,6 +91,61 @@ export default function FeesPage() {
   }, [termId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // unique classes derived from arms (structures are per class, not per arm)
+  const classes = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const a of arms as (Arm & { class_id?: string; class_name?: string })[]) {
+      if (a.class_id && !seen.has(a.class_id)) seen.set(a.class_id, a.class_name || a.label);
+    }
+    return [...seen.entries()].map(([id, name]) => ({ id, name }));
+  }, [arms]);
+
+  const catName = useMemo(() => {
+    const m = new Map(categories.map((c) => [c.id, c.name]));
+    return (id: string) => m.get(id) ?? "?";
+  }, [categories]);
+  const className = useMemo(() => {
+    const m = new Map(classes.map((c) => [c.id, c.name]));
+    return (id: string) => m.get(id) ?? "?";
+  }, [classes]);
+
+  async function addCategory() {
+    if (!newCat.trim()) return;
+    setBusy("cat"); setNotice(null);
+    try {
+      await api("/api/fees/categories", { method: "POST", body: JSON.stringify({ name: newCat.trim() }) });
+      setNewCat("");
+      await load();
+    } catch { setNotice({ kind: "err", text: "Could not add the category." }); }
+    finally { setBusy(null); }
+  }
+
+  async function addStructure() {
+    const amount = Number(newStruct.amount);
+    if (!newStruct.class_id || !newStruct.category_id || Number.isNaN(amount) || amount <= 0) {
+      setNotice({ kind: "err", text: "Pick a class and category, and enter a positive amount." });
+      return;
+    }
+    setBusy("struct"); setNotice(null);
+    try {
+      await api("/api/fees/structures", {
+        method: "POST",
+        body: JSON.stringify({ class_id: newStruct.class_id, term_id: termId,
+                               category_id: newStruct.category_id, amount }),
+      });
+      setNewStruct({ class_id: "", category_id: "", amount: "" });
+      setNotice({ kind: "ok", text: "Fee added. Repeat for other categories, then generate invoices." });
+      await load();
+    } catch (e) {
+      setNotice({
+        kind: "err",
+        text: e instanceof ApiError && e.status === 409
+          ? "That class already has a fee for this category this term."
+          : "Could not add the fee.",
+      });
+    } finally { setBusy(null); }
+  }
 
   async function generate() {
     if (!genArmId) return;
@@ -94,9 +162,13 @@ export default function FeesPage() {
       });
       await load();
     } catch (e) {
+      const msg = e instanceof ApiError ? e.message : "Invoice generation failed.";
+      if (msg.includes("no fee structure")) setSetupOpen(true);
       setNotice({
         kind: "err",
-        text: e instanceof ApiError ? e.message : "Invoice generation failed.",
+        text: msg.includes("no fee structure")
+          ? "No fees set for this class and term yet — add them in Fee setup above, then try again."
+          : msg,
       });
     } finally { setBusy(null); }
   }
@@ -158,6 +230,102 @@ export default function FeesPage() {
           Bill a class, record payments as they come in, and see where the term stands.
         </p>
       </header>
+
+      {/* ---- Fee setup (categories + per-class amounts for this term) ---- */}
+      <section className="rounded-lg border border-line bg-card">
+        <button onClick={() => setSetupOpen(!setupOpen)}
+                className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium">
+          <span>
+            Fee setup
+            <span className="ml-2 font-normal text-ink-soft">
+              {categories.length} categor{categories.length === 1 ? "y" : "ies"} ·{" "}
+              {structures.length} fee{structures.length === 1 ? "" : "s"} this term
+            </span>
+          </span>
+          <span aria-hidden className="text-ink-soft">{setupOpen ? "▴" : "▾"}</span>
+        </button>
+
+        {setupOpen && (
+          <div className="border-t border-line px-4 py-4 space-y-4">
+            <p className="text-xs text-ink-soft">
+              Invoices are the sum of a class&apos;s fees for the term. Add categories
+              once (School Fees, Exam Fees…), then set each class&apos;s amount below —
+              after that, Generate invoices will work.
+            </p>
+
+            {/* categories */}
+            <div className="flex flex-wrap items-center gap-2">
+              {categories.map((c) => (
+                <span key={c.id}
+                      className="rounded-full border border-line bg-paper px-3 py-1 text-xs">
+                  {c.name}
+                </span>
+              ))}
+              <input value={newCat} onChange={(e) => setNewCat(e.target.value)}
+                     onKeyDown={(e) => e.key === "Enter" && addCategory()}
+                     placeholder="New category e.g. School Fees"
+                     className="rounded border border-line px-2 py-1.5 text-xs w-52" />
+              <button onClick={addCategory} disabled={busy !== null || !newCat.trim()}
+                      className="rounded-md border border-ink text-ink px-3 py-1.5 text-xs font-medium hover:bg-ink hover:text-white disabled:opacity-40">
+                {busy === "cat" ? "Adding…" : "Add category"}
+              </button>
+            </div>
+
+            {/* structures for this term */}
+            {structures.length > 0 && (
+              <table className="text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-ink-soft">
+                    <th className="pr-6 py-1 font-medium">Class</th>
+                    <th className="pr-6 py-1 font-medium">Category</th>
+                    <th className="py-1 font-medium text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {structures.map((s) => (
+                    <tr key={s.id}>
+                      <td className="pr-6 py-1">{className(s.class_id)}</td>
+                      <td className="pr-6 py-1">{catName(s.category_id)}</td>
+                      <td className="py-1 text-right tabular">{ngn(s.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="block">
+                <span className="block text-xs text-ink-soft mb-1">Class</span>
+                <select value={newStruct.class_id}
+                        onChange={(e) => setNewStruct({ ...newStruct, class_id: e.target.value })}
+                        className="rounded border border-line px-2 py-1.5 text-sm bg-white">
+                  <option value="">Select…</option>
+                  {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </label>
+              <label className="block">
+                <span className="block text-xs text-ink-soft mb-1">Category</span>
+                <select value={newStruct.category_id}
+                        onChange={(e) => setNewStruct({ ...newStruct, category_id: e.target.value })}
+                        className="rounded border border-line px-2 py-1.5 text-sm bg-white">
+                  <option value="">Select…</option>
+                  {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </label>
+              <label className="block">
+                <span className="block text-xs text-ink-soft mb-1">Amount (NGN)</span>
+                <input inputMode="decimal" value={newStruct.amount}
+                       onChange={(e) => setNewStruct({ ...newStruct, amount: e.target.value })}
+                       className="w-32 rounded border border-line px-2 py-1.5 text-sm tabular" />
+              </label>
+              <button onClick={addStructure} disabled={busy !== null || !termId}
+                      className="rounded-md bg-ink text-white px-4 py-2 text-sm font-medium hover:bg-ink-soft disabled:opacity-50">
+                {busy === "struct" ? "Adding…" : "Add fee for class"}
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
 
       <div className="flex flex-wrap items-end gap-3">
         <label className="block">
