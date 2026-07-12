@@ -51,6 +51,7 @@ export default function LoginPage() {
             <input
               id="email"
               type="email"
+              suppressHydrationWarning
               required
               autoComplete="email"
               value={email}
@@ -67,6 +68,7 @@ export default function LoginPage() {
             <input
               id="password"
               type="password"
+              suppressHydrationWarning
               required
               autoComplete="current-password"
               value={password}

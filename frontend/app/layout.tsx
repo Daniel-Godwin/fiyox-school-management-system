@@ -19,7 +19,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           rel="stylesheet"
         />
       </head>
-      <body className="antialiased">{children}</body>
+      {/* suppressHydrationWarning: browser extensions (password managers etc.)
+          inject attributes into the DOM before React hydrates; this silences
+          that attribute-level noise only — real content mismatches still warn. */}
+      <body className="antialiased" suppressHydrationWarning>{children}</body>
     </html>
   );
 }
