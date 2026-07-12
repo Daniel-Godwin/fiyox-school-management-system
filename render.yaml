@@ -1,0 +1,25 @@
+# Render blueprint for the Fiyox API.
+# In the Render dashboard: New + → Blueprint → point at this repo.
+# Set the env vars marked sync:false in the dashboard (values live only there).
+services:
+  - type: web
+    name: fiyox-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    # migrations run before the server starts, so the schema always matches the code
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: ENV
+        value: prod
+      - key: SECRET_KEY
+        generateValue: true          # Render generates a strong random value
+      - key: DATABASE_URL
+        sync: false                  # paste your Neon connection string in the dashboard
+      - key: FRONTEND_ORIGIN
+        sync: false                  # your Vercel URL, e.g. https://fiyox.vercel.app
+      - key: PAYSTACK_SECRET_KEY
+        sync: false                  # optional until you enable online payments
+      - key: TERMII_API_KEY
+        sync: false                  # optional until you enable SMS

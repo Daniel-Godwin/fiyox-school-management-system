@@ -21,7 +21,8 @@ app = FastAPI(title=settings.APP_NAME, version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tighten per-tenant in prod
+    # dev default "*"; in prod set FRONTEND_ORIGIN to your Vercel URL
+    allow_origins=[settings.FRONTEND_ORIGIN] if settings.FRONTEND_ORIGIN != "*" else ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
