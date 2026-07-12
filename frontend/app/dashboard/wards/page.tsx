@@ -5,7 +5,7 @@ import { api, openPdf, ApiError } from "@/lib/api";
 
 type Term = { id: string; name: string; session: string; is_current: boolean };
 type Ward = { student_id: string; name: string; admission_number: string; class_label: string };
-type FeeView = { student_id: string; invoice_number: string; amount: number; paid: number; balance: number; status: string };
+type FeeView = { id: string; student_id: string; invoice_number: string; amount: number; paid: number; balance: number; status: string };
 type AttSummary = { days_recorded: number; present: number; absent: number; late: number; excused: number };
 type Report = { summary: { average: number; position: number; class_size: number; grand_total: number } };
 
@@ -80,6 +80,21 @@ export default function WardsPage() {
     } catch (e) {
       setError(e instanceof ApiError ? e.message : `Could not open ${w.name}'s report card.`);
     } finally { setBusy(null); }
+  }
+
+  async function payOnline(fee: FeeView) {
+    setBusy(`pay-${fee.student_id}`);
+    setError(null);
+    try {
+      const res = await api<{ authorization_url: string }>(
+        `/api/fees/invoices/${fee.id}/pay/init`, { method: "POST" });
+      window.location.href = res.authorization_url;   // off to Paystack checkout
+    } catch (e) {
+      setError(e instanceof ApiError
+        ? e.message   // e.g. "Online payments are not enabled yet — please pay at the school bursary"
+        : "Could not start the payment.");
+      setBusy(null);
+    }
   }
 
   return (
@@ -186,6 +201,12 @@ export default function WardsPage() {
                         : "bg-sanction/10 text-sanction"}`}>
                       {fee.status.replace("_", " ")}
                     </span>
+                    {fee.balance > 0 && (
+                      <button onClick={() => payOnline(fee)} disabled={busy !== null}
+                              className="rounded-md bg-ink text-white px-3 py-1.5 text-xs font-medium hover:bg-ink-soft disabled:opacity-50">
+                        {busy === `pay-${fee.student_id}` ? "Starting…" : "Pay online"}
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <p className="text-sm text-ink-soft">No invoice for this term.</p>

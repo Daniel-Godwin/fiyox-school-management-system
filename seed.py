@@ -42,6 +42,10 @@ async def main():
                     hashed_password=hash_password("bursar123"),
                     role=Role.BURSAR, first_name="Chika", last_name="Nwosu",
                     phone="+2348010000009"))
+        db.add(User(school_id=school.id, email="teacher@gss-ikeja.ng",
+                    hashed_password=hash_password("teach123"),
+                    role=Role.TEACHER, first_name="Tunde", last_name="Bello",
+                    phone="+2348010000001"))
         parent = User(school_id=school.id, email="parent@gss-ikeja.ng",
                       hashed_password=hash_password("parent123"),
                       role=Role.PARENT, first_name="Mama", last_name="Chinedu",
@@ -116,6 +120,7 @@ async def main():
         print(f"STUDENT_ID={students[0].id}")
         print("  Super admin: owner@fiyox.ng / owner123")
         print("  School admin: admin@gss-ikeja.ng / admin123")
+        print("  Teacher: teacher@gss-ikeja.ng / teach123")
         print("  Bursar: bursar@gss-ikeja.ng / bursar123")
         print("  Parent (of Chinedu): parent@gss-ikeja.ng / parent123")
 

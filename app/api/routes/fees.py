@@ -207,3 +207,89 @@ async def fees_summary(
         "by_status": counts,
         "debtors": sorted(debtors, key=lambda d: -d["balance"]),
     }
+
+
+# ---------- Online payment (Paystack) ----------
+import json as _json
+import uuid as _uuid
+from app.core.deps import CurrentUser
+from app.models.student import Guardian
+from app.models.fees import PaymentMethod
+from app.services.paystack import (
+    gateway_configured, initialize_payment, verify_signature,
+)
+from app.services.fees import record_payment, paid_total as _paid_total
+
+
+@router.post("/invoices/{invoice_id}/pay/init")
+async def init_online_payment(invoice_id: str, db: DbDep, user: CurrentUser):
+    """Start a Paystack checkout for an invoice's outstanding balance.
+    Parents may pay for their own wards; bursar/admin may initiate for anyone."""
+    school_id = tenant_scope(user)
+    inv = await db.get(Invoice, invoice_id)
+    if not inv or inv.school_id != school_id:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    if user.role == Role.PARENT:
+        link = (await db.execute(select(Guardian).where(
+            Guardian.parent_user_id == user.id,
+            Guardian.student_id == inv.student_id))).scalars().first()
+        if not link:
+            raise HTTPException(status_code=403, detail="Not your ward's invoice")
+    elif user.role not in (Role.SCHOOL_ADMIN, Role.BURSAR, Role.SUPER_ADMIN, Role.STUDENT):
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+    paid = await _paid_total(db, inv.id)
+    balance = round(inv.amount - inv.discount - paid, 2)
+    if balance <= 0:
+        raise HTTPException(status_code=400, detail="This invoice is fully paid")
+
+    if not gateway_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Online payments are not enabled yet — please pay at the school bursary")
+
+    reference = f"PSK-{inv.invoice_number}-{_uuid.uuid4().hex[:8]}"
+    url, err = await initialize_payment(
+        email=user.email, amount_kobo=int(round(balance * 100)),
+        reference=reference,
+        metadata={"invoice_id": inv.id, "school_id": school_id})
+    if err:
+        raise HTTPException(status_code=502, detail=f"Payment gateway error: {err}")
+    return {"authorization_url": url, "reference": reference, "amount": balance}
+
+
+@router.post("/paystack/webhook")
+async def paystack_webhook(request: Request, db: DbDep):
+    """Paystack calls this after a charge. Trust nothing until the HMAC-SHA512
+    signature of the raw body verifies; then record the payment idempotently."""
+    raw = await request.body()
+    signature = request.headers.get("x-paystack-signature")
+    if not verify_signature(raw, signature):
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    try:
+        event = _json.loads(raw)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid payload")
+
+    if event.get("event") != "charge.success":
+        return {"received": True, "ignored": event.get("event")}
+
+    data = event.get("data") or {}
+    meta = data.get("metadata") or {}
+    invoice_id = meta.get("invoice_id")
+    school_id = meta.get("school_id")
+    reference = data.get("reference")
+    amount_naira = round((data.get("amount") or 0) / 100, 2)
+    if not (invoice_id and school_id and reference and amount_naira > 0):
+        raise HTTPException(status_code=400, detail="Missing payment details")
+
+    res, err = await record_payment(
+        db, school_id, None,
+        invoice_id=invoice_id, method=PaymentMethod.PAYSTACK,
+        reference=reference, amount=amount_naira,
+        ip=request.client.host if request.client else None)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    return {"received": True, "duplicate": res["duplicate"]}
