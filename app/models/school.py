@@ -43,6 +43,10 @@ class School(Base, UUIDMixin, TimestampMixin):
     address: Mapped[str | None] = mapped_column(String(300))
     state: Mapped[str | None] = mapped_column(String(60))
     logo_url: Mapped[str | None] = mapped_column(String(400))
+    # principal's signature and the school stamp, printed on the report card
+    signature_url: Mapped[str | None] = mapped_column(String(400))
+    stamp_url: Mapped[str | None] = mapped_column(String(400))
+    principal_name: Mapped[str | None] = mapped_column(String(120))
     primary_color: Mapped[str] = mapped_column(String(9), default="#0B1F3A")
     # per-school configurable grading & policies
     grading_config: Mapped[dict] = mapped_column(JSON, default=DEFAULT_GRADING)

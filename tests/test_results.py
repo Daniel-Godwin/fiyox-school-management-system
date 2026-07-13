@@ -32,7 +32,8 @@ async def test_compute_totals_grades_positions(ctx):
 
     res = (await client.post("/api/results/compute", headers=h,
            json={"arm_id": ids["arm_id"], "term_id": ids["term_id"]})).json()
-    assert res == {"students": 3, "subjects": 1}
+    assert res["students"] == 3 and res["subjects"] == 1
+    assert "class_average" in res      # compute now also reports the class mean
 
     # top student: total 80 -> A1, position 1
     top = (await client.get(f"/api/report/{ids['student_ids'][0]}",

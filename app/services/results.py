@@ -82,6 +82,19 @@ async def compute_term(db: AsyncSession, school_id: str, arm_id: str, term_id: s
         subj_positions[subj] = rank(pairs)
         subj_average[subj] = round(sum(p[1] for p in pairs) / len(pairs), 2) if pairs else 0.0
 
+    # remember any human-written comments before wiping — recomputing a term
+    # must never destroy what a form teacher or principal actually wrote
+    previous_comments: dict[str, tuple[str, str]] = {}
+    existing_trs = (await db.execute(
+        select(TermResult).where(TermResult.school_id == school_id,
+                                 TermResult.arm_id == arm_id,
+                                 TermResult.term_id == term_id)
+    )).scalars().all()
+    for tr in existing_trs:
+        if tr.comments_edited:
+            previous_comments[tr.student_id] = (tr.form_teacher_comment,
+                                                tr.principal_comment)
+
     # wipe old computed rows for this arm+term, then rewrite
     for model in (SubjectResult, TermResult):
         old = (await db.execute(
@@ -95,6 +108,7 @@ async def compute_term(db: AsyncSession, school_id: str, arm_id: str, term_id: s
     # per-student grand totals for overall ranking
     grand = {sid: sum(totals[sid].values()) for sid in student_ids if sid in totals}
     overall_positions = rank(list(grand.items()))
+    term_results: dict[str, TermResult] = {}
 
     for sid in student_ids:
         if sid not in totals:
@@ -113,13 +127,37 @@ async def compute_term(db: AsyncSession, school_id: str, arm_id: str, term_id: s
             subj_count += 1
 
         gt = round(grand[sid], 2)
-        db.add(TermResult(
+        term_results[sid] = TermResult(
             school_id=school_id, student_id=sid, arm_id=arm_id, term_id=term_id,
             grand_total=gt,
             average=round(gt / subj_count, 2) if subj_count else 0.0,
             subjects_count=subj_count, class_size=len(grand),
             overall_position=overall_positions.get(sid, 0),
-        ))
+        )
+        db.add(term_results[sid])
+
+    # ---- auto-generated comments (class-relative) ----
+    # Preserve any comment a human already wrote for this student+term.
+    from app.services.comments import generate_comments
+    from app.models.student import Student as _Student
+
+    averages = [tr.average for tr in term_results.values()]
+    class_avg = round(sum(averages) / len(averages), 2) if averages else 0.0
+
+    for sid, tr in term_results.items():
+        prior = previous_comments.get(sid, ("", ""))
+        student = await db.get(_Student, sid)
+        first = student.first_name if student else "The student"
+        auto_teacher, auto_principal = generate_comments(
+            first_name=first, average=tr.average,
+            position=tr.overall_position, class_size=tr.class_size,
+            class_average=class_avg)
+        # human edits win; blanks get the generated text
+        tr.form_teacher_comment = prior[0] or auto_teacher
+        tr.principal_comment = prior[1] or auto_principal
+        tr.comments_edited = bool(prior[0] or prior[1])
+        tr.class_average = class_avg
 
     await db.commit()
-    return {"students": len(grand), "subjects": len(subjects)}
+    return {"students": len(grand), "subjects": len(subjects),
+            "class_average": class_avg}

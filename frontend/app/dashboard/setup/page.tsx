@@ -9,7 +9,10 @@ type Subject = { id: string; name: string; code: string | null };
 type Component = { id: string; name: string; max_score: number; sequence: number };
 type SchoolSettings = {
   name: string; address: string | null; state: string | null;
-  primary_color: string; withhold_results_on_debt: boolean;
+  primary_color: string; principal_name: string | null;
+  withhold_results_on_debt: boolean;
+  has_logo: boolean; has_signature: boolean; has_stamp: boolean;
+  logo_url: string | null;
 };
 
 export default function SetupPage() {
@@ -60,6 +63,31 @@ export default function SetupPage() {
 
   const configured = terms.length > 0;
   const split = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
+
+  async function uploadAsset(asset: "logo" | "signature" | "stamp", file: File) {
+    setBusy(asset); setNotice(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      await api(`/api/schools/me/branding/${asset}`, { method: "POST", body: fd });
+      setNotice({ kind: "ok", text: `${asset[0].toUpperCase()}${asset.slice(1)} uploaded — it will appear on every report card.` });
+      await load();
+    } catch (e) {
+      setNotice({ kind: "err", text: e instanceof ApiError ? e.message : `Could not upload the ${asset}.` });
+    } finally { setBusy(null); }
+  }
+
+  async function savePrincipal(name: string) {
+    setBusy("principal"); setNotice(null);
+    try {
+      await api("/api/schools/me", {
+        method: "PATCH", body: JSON.stringify({ principal_name: name }),
+      });
+      setNotice({ kind: "ok", text: "Principal's name saved." });
+      await load();
+    } catch { setNotice({ kind: "err", text: "Could not save the name." }); }
+    finally { setBusy(null); }
+  }
 
   async function toggleWithhold(next: boolean) {
     setBusy("withhold"); setNotice(null);
@@ -225,6 +253,62 @@ export default function SetupPage() {
                   className="rounded-md bg-ink text-white px-5 py-2.5 text-sm font-medium hover:bg-ink-soft disabled:opacity-50">
             {busy === "quick" ? "Setting up…" : "Set up my school"}
           </button>
+        </section>
+      )}
+
+      {/* branding */}
+      {school && (
+        <section className="rounded-lg border border-line bg-card p-4 space-y-3">
+          <div>
+            <p className="text-sm font-medium">Report card branding</p>
+            <p className="text-xs text-ink-soft">
+              The crest, the principal&apos;s signature and the school stamp are
+              printed on every report card. PNG or JPEG, under 300 KB.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {([
+              { key: "logo" as const, label: "School crest / logo", has: school.has_logo },
+              { key: "signature" as const, label: "Principal's signature", has: school.has_signature },
+              { key: "stamp" as const, label: "School stamp", has: school.has_stamp },
+            ]).map((a) => (
+              <div key={a.key} className="rounded-md border border-line bg-paper p-3">
+                <p className="text-xs font-medium mb-1">{a.label}</p>
+                <p className={`text-xs mb-2 ${a.has ? "text-ledger" : "text-ink-soft"}`}>
+                  {a.has ? "Uploaded ✓" : "Not set"}
+                </p>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg"
+                  disabled={busy !== null}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) uploadAsset(a.key, f);
+                    e.target.value = "";
+                  }}
+                  className="block w-full text-xs file:mr-2 file:rounded file:border-0 file:bg-ink file:px-2 file:py-1 file:text-white file:text-xs"
+                />
+                {busy === a.key && <p className="text-xs text-ink-soft mt-1">Uploading…</p>}
+              </div>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="block">
+              <span className="block text-xs text-ink-soft mb-1">Principal&apos;s name (printed under the signature)</span>
+              <input
+                defaultValue={school.principal_name ?? ""}
+                placeholder="Rev. J. A. Danjuma"
+                onBlur={(e) => {
+                  const v = e.target.value.trim();
+                  if (v && v !== (school.principal_name ?? "")) savePrincipal(v);
+                }}
+                className="w-64 rounded border border-line px-2 py-1.5 text-sm"
+              />
+            </label>
+            <span className="text-xs text-ink-soft pb-2">Saves when you click away.</span>
+          </div>
         </section>
       )}
 

@@ -48,6 +48,7 @@ from app.services.audit import record_audit
 
 class SchoolSettingsIn(BaseModel):
     name: str | None = None
+    principal_name: str | None = None
     address: str | None = None
     state: str | None = None
     phone: str | None = None
@@ -69,7 +70,12 @@ async def my_school(
         "id": school.id, "name": school.name, "slug": school.slug,
         "address": school.address, "state": school.state, "phone": school.phone,
         "primary_color": school.primary_color,
+        "principal_name": school.principal_name,
         "withhold_results_on_debt": school.withhold_results_on_debt,
+        "has_logo": bool(school.logo_url),
+        "has_signature": bool(school.signature_url),
+        "has_stamp": bool(school.stamp_url),
+        "logo_url": school.logo_url,
     }
 
 
@@ -102,6 +108,57 @@ async def update_my_school(
         "id": school.id, "name": school.name, "address": school.address,
         "state": school.state, "phone": school.phone,
         "primary_color": school.primary_color,
+        "principal_name": school.principal_name,
         "withhold_results_on_debt": school.withhold_results_on_debt,
         "updated": list(changes.keys()),
     }
+
+
+# ---------- Branding assets (logo, signature, stamp) ----------
+from fastapi import File, UploadFile
+from app.services.branding import to_data_uri
+
+_ASSET_FIELDS = {"logo": "logo_url", "signature": "signature_url",
+                 "stamp": "stamp_url"}
+
+
+@router.post("/me/branding/{asset}", tags=["schools"])
+async def upload_branding(
+    asset: str, request: Request, db: DbDep,
+    user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN))],
+    file: UploadFile = File(...),
+):
+    """Upload the school logo, the principal's signature, or the school stamp.
+    PNG/JPEG, under 300 KB. These appear on every report card."""
+    field = _ASSET_FIELDS.get(asset)
+    if not field:
+        raise HTTPException(status_code=404,
+                            detail="Unknown asset — use logo, signature or stamp")
+    school_id = tenant_scope(user)
+    school = await db.get(School, school_id)
+    if not school:
+        raise HTTPException(status_code=404, detail="School not found")
+
+    uri = await to_data_uri(file)
+    setattr(school, field, uri)
+    await record_audit(db, school_id=school_id, user_id=user.id, action="update",
+                       table_name="schools", record_id=school.id,
+                       changes={field: {"old": "***", "new": f"{asset} uploaded"}},
+                       ip_address=request.client.host if request.client else None)
+    await db.commit()
+    return {"asset": asset, "saved": True}
+
+
+@router.delete("/me/branding/{asset}", tags=["schools"])
+async def delete_branding(
+    asset: str, db: DbDep,
+    user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN))],
+):
+    field = _ASSET_FIELDS.get(asset)
+    if not field:
+        raise HTTPException(status_code=404, detail="Unknown asset")
+    school_id = tenant_scope(user)
+    school = await db.get(School, school_id)
+    setattr(school, field, None)
+    await db.commit()
+    return {"asset": asset, "removed": True}

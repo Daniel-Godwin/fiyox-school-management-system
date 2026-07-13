@@ -74,9 +74,14 @@ class TermResult(Base, UUIDMixin, TimestampMixin, TenantMixin):
     subjects_count: Mapped[int] = mapped_column(Integer, default=0)
     class_size: Mapped[int] = mapped_column(Integer, default=0)
     overall_position: Mapped[int] = mapped_column(Integer, default=0)
+    # the arm's mean average this term — lets the report card say where the
+    # student stands relative to the class, and drives comment generation
+    class_average: Mapped[float] = mapped_column(Float, default=0.0)
     # affective/psychomotor domain, e.g. {"Punctuality": "A", "Neatness": "B"}
     affective: Mapped[dict] = mapped_column(JSON, default=dict)
-    # human-editable now; an LLM can pre-fill these later (Phase 4) with no change
+    # generated on compute; set comments_edited when a human overrides them, so
+    # recomputing the term never destroys what a teacher actually wrote
     form_teacher_comment: Mapped[str] = mapped_column(String(500), default="")
     principal_comment: Mapped[str] = mapped_column(String(500), default="")
+    comments_edited: Mapped[bool] = mapped_column(Boolean, default=False)
     is_published: Mapped[bool] = mapped_column(Boolean, default=False)

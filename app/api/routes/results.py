@@ -148,6 +148,8 @@ async def list_results(
             "position": tr.overall_position,
             "class_size": tr.class_size,
             "is_published": tr.is_published,
+            "form_teacher_comment": tr.form_teacher_comment,
+            "principal_comment": tr.principal_comment,
         })
     return sorted(rows, key=lambda r: r["position"])
 
@@ -197,6 +199,9 @@ async def update_term_result(
         if old != value:
             changes[field] = {"old": old, "new": value}
             setattr(tr, field, value)
+    # a human has spoken: recomputing the term must not overwrite their words
+    if changes.keys() & {"form_teacher_comment", "principal_comment"}:
+        tr.comments_edited = True
     tr.updated_by = user.id
     action = "publish" if fields.get("is_published") else "update"
     await record_audit(db, school_id=school_id, user_id=user.id, action=action,

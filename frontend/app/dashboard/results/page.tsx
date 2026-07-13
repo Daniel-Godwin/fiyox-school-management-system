@@ -1,12 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { api, me, openPdf, User, ApiError } from "@/lib/api";
 
 type Term = { id: string; name: string; session: string; is_current: boolean };
 type Arm = { id: string; label: string };
 type Row = {
   term_result_id: string;
+  form_teacher_comment?: string;
+  principal_comment?: string;
   student_id: string;
   admission_number: string;
   name: string;
@@ -29,6 +31,8 @@ export default function ResultsPage() {
   const [armId, setArmId] = useState("");
   const [rows, setRows] = useState<Row[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null); // "compute" | "publish" | pdf id
+  const [editing, setEditing] = useState<string | null>(null);   // term_result_id
+  const [draft, setDraft] = useState({ teacher: "", principal: "" });
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   useEffect(() => {
@@ -104,6 +108,34 @@ export default function ResultsPage() {
     } finally {
       setBusy(null);
     }
+  }
+
+  function openComments(row: Row) {
+    setEditing(row.term_result_id);
+    setDraft({
+      teacher: row.form_teacher_comment ?? "",
+      principal: row.principal_comment ?? "",
+    });
+    setNotice(null);
+  }
+
+  async function saveComments(row: Row) {
+    setBusy(`c-${row.term_result_id}`);
+    setNotice(null);
+    try {
+      await api(`/api/term-results/${row.term_result_id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          form_teacher_comment: draft.teacher,
+          principal_comment: draft.principal,
+        }),
+      });
+      setNotice({ kind: "ok", text: `Comments saved for ${row.name}. Recomputing will not overwrite them.` });
+      setEditing(null);
+      await load();
+    } catch {
+      setNotice({ kind: "err", text: "Could not save the comments." });
+    } finally { setBusy(null); }
   }
 
   async function pdf(row: Row) {
@@ -200,12 +232,14 @@ export default function ResultsPage() {
                     <th className="px-3 py-2 font-medium text-right">Total</th>
                     <th className="px-3 py-2 font-medium text-right">Average</th>
                     <th className="px-3 py-2 font-medium">Status</th>
+                    <th className="px-3 py-2 font-medium text-right">Comments</th>
                     <th className="px-3 py-2 font-medium text-right">Report card</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((r, i) => (
-                    <tr key={r.term_result_id} className={i % 2 ? "bg-paper" : "bg-card"}>
+                  <Fragment key={r.term_result_id}>
+                    <tr className={i % 2 ? "bg-paper" : "bg-card"}>
                       <td className="px-3 py-2 tabular font-medium">
                         {ordinal(r.position)}
                         <span className="text-ink-soft font-normal"> / {r.class_size}</span>
@@ -229,12 +263,54 @@ export default function ResultsPage() {
                         )}
                       </td>
                       <td className="px-3 py-2 text-right">
+                        <button onClick={() => openComments(r)} disabled={busy !== null}
+                                className="text-ink underline underline-offset-2 hover:text-ink-soft disabled:opacity-50">
+                          {editing === r.term_result_id ? "Editing…" : "Edit"}
+                        </button>
+                      </td>
+                      <td className="px-3 py-2 text-right">
                         <button onClick={() => pdf(r)} disabled={busy !== null}
                                 className="text-ink underline underline-offset-2 hover:text-ink-soft disabled:opacity-50">
                           {busy === r.term_result_id ? "Opening…" : "Open PDF"}
                         </button>
                       </td>
                     </tr>
+                    {editing === r.term_result_id && (
+                      <tr className={i % 2 ? "bg-paper" : "bg-card"}>
+                        <td colSpan={8} className="px-3 pb-3">
+                          <div className="rounded-md border border-line bg-white p-3 space-y-2">
+                            <p className="text-xs text-ink-soft">
+                              Fiyox drafted these from {r.name.split(" ")[0]}&apos;s performance
+                              against the class. Edit freely — your words are kept even if the
+                              term is recomputed.
+                            </p>
+                            <label className="block">
+                              <span className="block text-xs text-ink-soft mb-1">Form teacher&apos;s comment</span>
+                              <textarea value={draft.teacher} rows={2} maxLength={500}
+                                        onChange={(e) => setDraft({ ...draft, teacher: e.target.value })}
+                                        className="w-full rounded border border-line px-2 py-1.5 text-sm" />
+                            </label>
+                            <label className="block">
+                              <span className="block text-xs text-ink-soft mb-1">Principal&apos;s comment</span>
+                              <textarea value={draft.principal} rows={2} maxLength={500}
+                                        onChange={(e) => setDraft({ ...draft, principal: e.target.value })}
+                                        className="w-full rounded border border-line px-2 py-1.5 text-sm" />
+                            </label>
+                            <div className="flex items-center gap-3">
+                              <button onClick={() => saveComments(r)} disabled={busy !== null}
+                                      className="rounded-md bg-ink text-white px-4 py-2 text-sm font-medium hover:bg-ink-soft disabled:opacity-50">
+                                {busy === `c-${r.term_result_id}` ? "Saving…" : "Save comments"}
+                              </button>
+                              <button onClick={() => setEditing(null)} disabled={busy !== null}
+                                      className="text-sm text-ink-soft underline underline-offset-2">
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                   ))}
                 </tbody>
               </table>

@@ -37,7 +37,8 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   const token = getToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  if (init.body && !headers.has("Content-Type")) {
+  if (init.body && !headers.has("Content-Type") && !(init.body instanceof FormData)) {
+    // FormData must set its own multipart boundary — never override it
     headers.set("Content-Type", "application/json");
   }
   const res = await fetch(`${API}${path}`, { ...init, headers });
