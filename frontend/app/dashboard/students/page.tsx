@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 
 type Student = {
@@ -12,18 +12,60 @@ type Student = {
   is_active: boolean;
 };
 
+type Arm = { id: string; label: string };
+
 export default function StudentsPage() {
   const [students, setStudents] = useState<Student[] | null>(null);
+  const [arms, setArms] = useState<Arm[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
 
-  useEffect(() => {
+  // admit form
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({
+    admission_number: "", first_name: "", last_name: "",
+    gender: "male", arm_id: "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  const load = useCallback(() => {
     api<Student[]>("/api/students")
       .then(setStudents)
       .catch((e) =>
         setError(e instanceof ApiError ? e.message : "Could not load students"),
       );
+    api<Arm[]>("/api/academics/arms").then(setArms).catch(() => {});
   }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function admit() {
+    if (!form.admission_number.trim() || !form.first_name.trim() ||
+        !form.last_name.trim() || !form.arm_id) {
+      setNotice({ kind: "err", text: "Admission number, names and class are all required." });
+      return;
+    }
+    setSaving(true); setNotice(null);
+    try {
+      await api("/api/students", {
+        method: "POST",
+        body: JSON.stringify({
+          admission_number: form.admission_number.trim(),
+          first_name: form.first_name.trim(),
+          last_name: form.last_name.trim(),
+          gender: form.gender,
+          current_arm_id: form.arm_id,
+        }),
+      });
+      setNotice({ kind: "ok", text: `${form.first_name} ${form.last_name} admitted.` });
+      setForm({ admission_number: "", first_name: "", last_name: "",
+                gender: form.gender, arm_id: form.arm_id });
+      load();
+    } catch (e) {
+      setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not admit the student." });
+    } finally { setSaving(false); }
+  }
 
   const shown = (students ?? []).filter((s) =>
     `${s.admission_number} ${s.first_name} ${s.last_name}`
@@ -47,6 +89,77 @@ export default function StudentsPage() {
           className="rounded-md border border-line bg-white px-3 py-2 text-sm w-64"
         />
       </div>
+
+      {/* ---- Admit a student ---- */}
+      <section className="mt-5 rounded-lg border border-line bg-card">
+        <button onClick={() => setOpen(!open)}
+                className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium">
+          <span>Admit a student</span>
+          <span aria-hidden className="text-ink-soft">{open ? "▴" : "▾"}</span>
+        </button>
+        {open && (
+          <div className="border-t border-line px-4 py-4 space-y-3">
+            {arms.length === 0 ? (
+              <p className="text-sm text-sanction">
+                No classes exist yet — set up the school first (School setup in the sidebar).
+              </p>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <label className="block">
+                    <span className="block text-xs text-ink-soft mb-1">Admission number</span>
+                    <input value={form.admission_number} placeholder="FDC/26/001"
+                           onChange={(e) => setForm({ ...form, admission_number: e.target.value })}
+                           className="w-full rounded border border-line px-2 py-1.5 text-sm" />
+                  </label>
+                  <label className="block">
+                    <span className="block text-xs text-ink-soft mb-1">First name</span>
+                    <input value={form.first_name}
+                           onChange={(e) => setForm({ ...form, first_name: e.target.value })}
+                           className="w-full rounded border border-line px-2 py-1.5 text-sm" />
+                  </label>
+                  <label className="block">
+                    <span className="block text-xs text-ink-soft mb-1">Last name</span>
+                    <input value={form.last_name}
+                           onChange={(e) => setForm({ ...form, last_name: e.target.value })}
+                           className="w-full rounded border border-line px-2 py-1.5 text-sm" />
+                  </label>
+                  <label className="block">
+                    <span className="block text-xs text-ink-soft mb-1">Gender</span>
+                    <select value={form.gender}
+                            onChange={(e) => setForm({ ...form, gender: e.target.value })}
+                            className="w-full rounded border border-line px-2 py-1.5 text-sm bg-white">
+                      <option value="male">Male</option>
+                      <option value="female">Female</option>
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="block text-xs text-ink-soft mb-1">Class</span>
+                    <select value={form.arm_id}
+                            onChange={(e) => setForm({ ...form, arm_id: e.target.value })}
+                            className="w-full rounded border border-line px-2 py-1.5 text-sm bg-white">
+                      <option value="">Select class…</option>
+                      {arms.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+                    </select>
+                  </label>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button onClick={admit} disabled={saving}
+                          className="rounded-md bg-ink text-white px-4 py-2 text-sm font-medium hover:bg-ink-soft disabled:opacity-50">
+                    {saving ? "Admitting…" : "Admit student"}
+                  </button>
+                  {notice && (
+                    <span role="status"
+                          className={`text-sm ${notice.kind === "ok" ? "text-ledger" : "text-sanction"}`}>
+                      {notice.text}
+                    </span>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </section>
 
       {error && (
         <p role="alert" className="mt-6 text-sanction text-sm">

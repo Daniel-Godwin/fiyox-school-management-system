@@ -19,6 +19,9 @@ from app.schemas.attendance import (
 )
 from app.schemas.communication import AnnouncementIn, AnnouncementOut
 from app.schemas.notifications import FeeReminderIn, MessageLogOut
+from app.schemas.setup import (
+    SessionIn, TermIn, ClassIn, ArmIn, SubjectIn, QuickSetupIn,
+)
 from app.schemas.users import (
     UserCreate, UserAdminOut, UserCreatedOut, UserStatusIn, WardLinkIn,
     ChangePasswordIn,
@@ -37,4 +40,5 @@ __all__ = [
     "FeeReminderIn", "MessageLogOut",
     "UserCreate", "UserAdminOut", "UserCreatedOut", "UserStatusIn",
     "WardLinkIn", "ChangePasswordIn",
+    "SessionIn", "TermIn", "ClassIn", "ArmIn", "SubjectIn", "QuickSetupIn",
 ]

@@ -10,6 +10,12 @@ The script is safe to re-run: it refuses to create a duplicate.
 import asyncio
 import getpass
 import sys
+from pathlib import Path
+
+# Ensure the project root is importable even when run as
+# `python scripts/create_super_admin.py` (Python roots imports at the
+# script's folder, not the current directory).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sqlalchemy import select
 from app.core.database import SessionLocal, engine
