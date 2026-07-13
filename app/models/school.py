@@ -1,6 +1,6 @@
 """The tenant (School) and platform/tenant Users with RBAC roles."""
 import enum
-from sqlalchemy import Boolean, JSON, String, UniqueConstraint
+from sqlalchemy import Boolean, JSON, String, UniqueConstraint, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import Base, UUIDMixin, TimestampMixin
 
@@ -42,10 +42,13 @@ class School(Base, UUIDMixin, TimestampMixin):
     phone: Mapped[str | None] = mapped_column(String(40))
     address: Mapped[str | None] = mapped_column(String(300))
     state: Mapped[str | None] = mapped_column(String(60))
-    logo_url: Mapped[str | None] = mapped_column(String(400))
+    # These hold base64 data URIs (tens of thousands of characters), not URLs.
+    # Text, not String(n): Postgres enforces varchar limits strictly and would
+    # reject an image with StringDataRightTruncation.
+    logo_url: Mapped[str | None] = mapped_column(Text)
     # principal's signature and the school stamp, printed on the report card
-    signature_url: Mapped[str | None] = mapped_column(String(400))
-    stamp_url: Mapped[str | None] = mapped_column(String(400))
+    signature_url: Mapped[str | None] = mapped_column(Text)
+    stamp_url: Mapped[str | None] = mapped_column(Text)
     principal_name: Mapped[str | None] = mapped_column(String(120))
     primary_color: Mapped[str] = mapped_column(String(9), default="#0B1F3A")
     # per-school configurable grading & policies

@@ -5,11 +5,27 @@ from app.services.comments import generate_comments
 from tests.conftest import headers
 
 
-def _png_bytes(color=(11, 79, 108)) -> bytes:
+def _png_bytes(color=(11, 79, 108), size=(60, 60)) -> bytes:
     from PIL import Image
-    img = Image.new("RGB", (60, 60), color)
+    img = Image.new("RGB", size, color)
     b = io.BytesIO()
     img.save(b, "PNG")
+    return b.getvalue()
+
+
+def _big_jpeg_bytes() -> bytes:
+    """A realistic photo-sized logo: base64 of this is tens of thousands of
+    characters, which is what broke production (varchar(400) columns)."""
+    from PIL import Image
+    import random
+    img = Image.new("RGB", (400, 400))
+    px = img.load()
+    rnd = random.Random(7)
+    for x in range(400):          # noise defeats JPEG compression -> big payload
+        for y in range(400):
+            px[x, y] = (rnd.randint(0, 255), rnd.randint(0, 255), rnd.randint(0, 255))
+    b = io.BytesIO()
+    img.save(b, "JPEG", quality=85)
     return b.getvalue()
 
 
@@ -114,6 +130,19 @@ async def test_branding_upload_and_appears_on_pdf(ctx):
     assert pdf.status_code == 200
     assert pdf.content[:4] == b"%PDF"
     assert len(pdf.content) > 3000        # images actually embedded
+
+    # a realistic image must actually PERSIST — the stored data URI runs to tens
+    # of thousands of characters, so the column must be TEXT, not VARCHAR(400).
+    # (Production rejected exactly this with StringDataRightTruncation.)
+    big = _big_jpeg_bytes()
+    r = await client.post("/api/schools/me/branding/logo", headers=ah,
+                          files={"file": ("photo.jpg", big, "image/jpeg")})
+    assert r.status_code == 200
+    from app.models.school import School
+    async with ids["session_factory"]() as db:
+        school = await db.get(School, ids["school_id"])
+        assert school.logo_url and len(school.logo_url) > 20_000, (
+            "the image did not persist in full")
 
     # a PNG mislabelled by the browser (very common on Windows) is still accepted:
     # the format is decided by the file's magic bytes, not the label
