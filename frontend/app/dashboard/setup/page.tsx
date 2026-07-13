@@ -7,12 +7,17 @@ type Term = { id: string; name: string; session: string; is_current: boolean };
 type Arm = { id: string; label: string; class_id: string; class_name: string };
 type Subject = { id: string; name: string; code: string | null };
 type Component = { id: string; name: string; max_score: number; sequence: number };
+type SchoolSettings = {
+  name: string; address: string | null; state: string | null;
+  primary_color: string; withhold_results_on_debt: boolean;
+};
 
 export default function SetupPage() {
   const [terms, setTerms] = useState<Term[]>([]);
   const [arms, setArms] = useState<Arm[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [components, setComponents] = useState<Component[]>([]);
+  const [school, setSchool] = useState<SchoolSettings | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
@@ -32,13 +37,14 @@ export default function SetupPage() {
 
   const load = useCallback(async () => {
     try {
-      const [t, a, s, c] = await Promise.all([
+      const [t, a, s, c, sc] = await Promise.all([
         api<Term[]>("/api/academics/terms"),
         api<Arm[]>("/api/academics/arms"),
         api<Subject[]>("/api/academics/subjects"),
         api<Component[]>("/api/assessment-components"),
+        api<SchoolSettings>("/api/schools/me"),
       ]);
-      setTerms(t); setArms(a); setSubjects(s);
+      setTerms(t); setArms(a); setSubjects(s); setSchool(sc);
       setComponents([...c].sort((x, y) => x.sequence - y.sequence));
     } catch (e) {
       setNotice({
@@ -54,6 +60,25 @@ export default function SetupPage() {
 
   const configured = terms.length > 0;
   const split = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
+
+  async function toggleWithhold(next: boolean) {
+    setBusy("withhold"); setNotice(null);
+    try {
+      await api("/api/schools/me", {
+        method: "PATCH",
+        body: JSON.stringify({ withhold_results_on_debt: next }),
+      });
+      setNotice({
+        kind: "ok",
+        text: next
+          ? "Results are now withheld from parents who owe fees for the term."
+          : "Withholding is off — parents can see published results regardless of fees.",
+      });
+      await load();
+    } catch (e) {
+      setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not save the policy." });
+    } finally { setBusy(null); }
+  }
 
   async function runQuickSetup() {
     setBusy("quick"); setNotice(null);
@@ -200,6 +225,36 @@ export default function SetupPage() {
                   className="rounded-md bg-ink text-white px-5 py-2.5 text-sm font-medium hover:bg-ink-soft disabled:opacity-50">
             {busy === "quick" ? "Setting up…" : "Set up my school"}
           </button>
+        </section>
+      )}
+
+      {/* policies */}
+      {school && (
+        <section className="rounded-lg border border-line bg-card p-4">
+          <p className="text-sm font-medium mb-2">Policies</p>
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={school.withhold_results_on_debt}
+              disabled={busy !== null}
+              onChange={(e) => toggleWithhold(e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-[color:var(--ink,#0B2239)]"
+            />
+            <span className="text-sm">
+              Withhold results from fee debtors
+              <span className="block text-xs text-ink-soft mt-0.5">
+                When on, a parent or student with an outstanding balance for the term
+                cannot view or download the report card — they see a withheld notice
+                instead. Staff are never blocked, and the result unlocks the moment the
+                bursar records payment.
+              </span>
+            </span>
+          </label>
+          {school.withhold_results_on_debt && (
+            <p className="mt-2 text-xs text-brass-ink bg-brass/15 rounded px-2 py-1 inline-block">
+              Currently withholding results from debtors.
+            </p>
+          )}
         </section>
       )}
 

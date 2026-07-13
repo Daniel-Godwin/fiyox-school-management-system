@@ -37,3 +37,71 @@ async def create_school(
     await db.commit()
     await db.refresh(school)
     return school
+
+
+# ---------- School settings (school admin manages their own school) ----------
+from fastapi import Request
+from pydantic import BaseModel
+from app.core.deps import tenant_scope
+from app.services.audit import record_audit
+
+
+class SchoolSettingsIn(BaseModel):
+    name: str | None = None
+    address: str | None = None
+    state: str | None = None
+    phone: str | None = None
+    primary_color: str | None = None      # hex, brands the report card & receipt
+    withhold_results_on_debt: bool | None = None
+
+
+@router.get("/me", tags=["schools"])
+async def my_school(
+    db: DbDep,
+    user: Annotated[User, Depends(require_roles(
+        Role.SCHOOL_ADMIN, Role.BURSAR, Role.TEACHER))],
+):
+    school_id = tenant_scope(user)
+    school = await db.get(School, school_id)
+    if not school:
+        raise HTTPException(status_code=404, detail="School not found")
+    return {
+        "id": school.id, "name": school.name, "slug": school.slug,
+        "address": school.address, "state": school.state, "phone": school.phone,
+        "primary_color": school.primary_color,
+        "withhold_results_on_debt": school.withhold_results_on_debt,
+    }
+
+
+@router.patch("/me", tags=["schools"])
+async def update_my_school(
+    payload: SchoolSettingsIn, request: Request, db: DbDep,
+    user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN))],
+):
+    school_id = tenant_scope(user)
+    school = await db.get(School, school_id)
+    if not school:
+        raise HTTPException(status_code=404, detail="School not found")
+
+    changes = {}
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        old = getattr(school, field)
+        if value is not None and value != old:
+            changes[field] = {"old": old, "new": value}
+            setattr(school, field, value)
+
+    if changes:
+        await record_audit(db, school_id=school_id, user_id=user.id,
+                           action="update", table_name="schools",
+                           record_id=school.id, changes=changes,
+                           ip_address=request.client.host if request.client else None)
+        await db.commit()
+        await db.refresh(school)
+
+    return {
+        "id": school.id, "name": school.name, "address": school.address,
+        "state": school.state, "phone": school.phone,
+        "primary_color": school.primary_color,
+        "withhold_results_on_debt": school.withhold_results_on_debt,
+        "updated": list(changes.keys()),
+    }
