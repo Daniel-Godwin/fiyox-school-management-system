@@ -115,9 +115,16 @@ async def test_branding_upload_and_appears_on_pdf(ctx):
     assert pdf.content[:4] == b"%PDF"
     assert len(pdf.content) > 3000        # images actually embedded
 
-    # a non-image is rejected, and teachers cannot brand the school
+    # a PNG mislabelled by the browser (very common on Windows) is still accepted:
+    # the format is decided by the file's magic bytes, not the label
+    odd = await client.post("/api/schools/me/branding/logo", headers=ah,
+                            files={"file": ("logo.png", _png_bytes(),
+                                            "application/octet-stream")})
+    assert odd.status_code == 200
+
+    # but a non-image is rejected even if it claims to be a PNG
     bad = await client.post("/api/schools/me/branding/logo", headers=ah,
-                            files={"file": ("x.txt", b"not an image", "text/plain")})
+                            files={"file": ("x.png", b"not an image", "image/png")})
     assert bad.status_code == 400
     th = await headers(client, "teacher@gss-ikeja.ng", "teach123")
     denied = await client.post("/api/schools/me/branding/logo", headers=th,

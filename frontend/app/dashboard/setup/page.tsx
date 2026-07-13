@@ -67,13 +67,22 @@ export default function SetupPage() {
   async function uploadAsset(asset: "logo" | "signature" | "stamp", file: File) {
     setBusy(asset); setNotice(null);
     try {
+      if (file.size > 300_000) {
+        throw new ApiError(413, `That image is ${Math.round(file.size / 1024)} KB — please use one under 300 KB.`);
+      }
       const fd = new FormData();
       fd.append("file", file);
       await api(`/api/schools/me/branding/${asset}`, { method: "POST", body: fd });
       setNotice({ kind: "ok", text: `${asset[0].toUpperCase()}${asset.slice(1)} uploaded — it will appear on every report card.` });
       await load();
     } catch (e) {
-      setNotice({ kind: "err", text: e instanceof ApiError ? e.message : `Could not upload the ${asset}.` });
+      // show what actually went wrong, not a generic message
+      const detail = e instanceof ApiError
+        ? `${e.message} (HTTP ${e.status})`
+        : e instanceof Error
+          ? e.message
+          : "Unknown error";
+      setNotice({ kind: "err", text: `Could not upload the ${asset}: ${detail}` });
     } finally { setBusy(null); }
   }
 
