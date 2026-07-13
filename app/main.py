@@ -19,12 +19,36 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=settings.APP_NAME, version="0.1.0", lifespan=lifespan)
 
+def _cors_origins() -> list[str]:
+    """FRONTEND_ORIGIN may hold one origin or a comma-separated list.
+    Trailing slashes are stripped — 'https://x.vercel.app/' and
+    'https://x.vercel.app' must both work, since a stray slash would
+    otherwise silently break every browser preflight.
+    """
+    raw = (settings.FRONTEND_ORIGIN or "*").strip()
+    if raw == "*":
+        return ["*"]
+    origins = []
+    for part in raw.split(","):
+        o = part.strip().rstrip("/")
+        if o:
+            origins.append(o)
+    return origins or ["*"]
+
+
+_origins = _cors_origins()
+
 app.add_middleware(
     CORSMiddleware,
-    # dev default "*"; in prod set FRONTEND_ORIGIN to your Vercel URL
-    allow_origins=[settings.FRONTEND_ORIGIN] if settings.FRONTEND_ORIGIN != "*" else ["*"],
-    allow_methods=["*"],
+    allow_origins=_origins,
+    # Vercel gives every deployment a preview URL; allow those too so testing
+    # from a preview build does not fail with an opaque "Failed to fetch".
+    allow_origin_regex=None if _origins == ["*"] else r"https://.*\.vercel\.app",
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],   # so the browser can name PDFs
+    max_age=3600,                              # cache preflights for an hour
 )
 
 app.include_router(api_router)
