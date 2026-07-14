@@ -25,6 +25,10 @@ export default function SetupPage() {
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [components, setComponents] = useState<Component[]>([]);
   const [school, setSchool] = useState<SchoolSettings | null>(null);
+  const [integrations, setIntegrations] = useState<{
+    sms: { live: boolean; message: string };
+    online_payments: { live: boolean; message: string };
+  } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
@@ -51,6 +55,8 @@ export default function SetupPage() {
         api<Component[]>("/api/assessment-components"),
         api<SchoolSettings>("/api/schools/me"),
       ]);
+      api<typeof integrations>("/api/notifications/status")
+        .then(setIntegrations).catch(() => {});
       setTerms(t); setArms(a); setSubjects(s); setSchool(sc);
       setComponents([...c].sort((x, y) => x.sequence - y.sequence));
     } catch (e) {
@@ -300,6 +306,31 @@ export default function SetupPage() {
                   className="rounded-md bg-ink text-white px-5 py-2.5 text-sm font-medium hover:bg-ink-soft disabled:opacity-50">
             {busy === "quick" ? "Setting up…" : "Set up my school"}
           </button>
+        </section>
+      )}
+
+      {/* integrations */}
+      {integrations && (
+        <section className="rounded-lg border border-line bg-card p-4">
+          <p className="text-sm font-medium mb-2">Integrations</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {[
+              { label: "Online payments (Paystack)", ...integrations.online_payments },
+              { label: "SMS to parents (Termii)", ...integrations.sms },
+            ].map((i) => (
+              <div key={i.label} className="rounded-md border border-line bg-paper p-3">
+                <div className="flex items-center gap-2">
+                  <span className={`inline-block h-2 w-2 rounded-full ${
+                    i.live ? "bg-ledger" : "bg-ink-soft"}`} />
+                  <span className="text-xs font-medium">{i.label}</span>
+                  <span className={`text-xs ${i.live ? "text-ledger" : "text-ink-soft"}`}>
+                    {i.live ? "live" : "off"}
+                  </span>
+                </div>
+                <p className="text-xs text-ink-soft mt-1">{i.message}</p>
+              </div>
+            ))}
+          </div>
         </section>
       )}
 

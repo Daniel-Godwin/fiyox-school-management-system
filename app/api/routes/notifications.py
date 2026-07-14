@@ -9,6 +9,7 @@
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
+from app.core.config import settings
 from app.core.deps import DbDep, require_roles, tenant_scope
 from app.models.school import School, User, Role
 from app.models.communication import Announcement
@@ -102,3 +103,37 @@ async def delivery_logs(
         stmt = stmt.where(MessageLog.purpose == purpose)
     stmt = stmt.order_by(MessageLog.created_at.desc()).limit(limit)
     return list((await db.execute(stmt)).scalars().all())
+
+
+@router.get("/status")
+async def notification_status(
+    user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN, Role.BURSAR))],
+):
+    """Is SMS actually going out, or only being logged?
+
+    Without this a school cannot tell the difference between 'messages sent' and
+    'messages pretended', which is exactly the sort of thing you discover on the
+    day fees are due.
+    """
+    from app.services.notify import get_provider
+    from app.services.paystack import gateway_configured
+    provider = get_provider()
+    live = provider.name != "mock"
+    return {
+        "sms": {
+            "provider": provider.name,
+            "live": live,
+            "message": ("SMS messages are being delivered via Termii."
+                        if live else
+                        "SMS is in preview mode: messages are composed and logged, "
+                        "but not delivered. Set TERMII_API_KEY to go live."),
+            "sender_id": settings.TERMII_SENDER_ID if live else None,
+        },
+        "online_payments": {
+            "live": gateway_configured(),
+            "message": ("Parents can pay online with Paystack."
+                        if gateway_configured() else
+                        "Online payments are off — parents are asked to pay at the "
+                        "bursary. Set PAYSTACK_SECRET_KEY to enable."),
+        },
+    }
