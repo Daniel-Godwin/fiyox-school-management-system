@@ -12,7 +12,8 @@ type Lesson = {
   subject_id: string; subject_name: string;
   teacher_id: string | null; teacher_name: string | null; room: string | null;
 };
-type Grid = { days: string[]; periods: Period[]; lessons: Lesson[] };
+type Ward = { student_id: string; name: string; arm_id: string };
+type Grid = { wards: Ward[]; days: string[]; periods: Period[]; lessons: Lesson[] };
 type Arm = { id: string; label: string };
 type Subject = { id: string; name: string };
 type Teacher = { id: string; first_name: string; last_name: string; role: string };
@@ -40,6 +41,9 @@ export default function TimetablePage() {
 
   const isAdmin = user?.role === "school_admin" || user?.role === "super_admin";
   const isTeacher = user?.role === "teacher";
+  const isFamily = user?.role === "parent" || user?.role === "student";
+  const wards = grid?.wards ?? [];
+  const multiWard = wards.length > 1;
 
   const load = useCallback(async () => {
     try {
@@ -127,8 +131,8 @@ export default function TimetablePage() {
     finally { setBusy(null); }
   }
 
-  const cell = (day: string, periodId: string) =>
-    grid?.lessons.find((l) => l.day === day && l.period_id === periodId);
+  const cellAll = (day: string, periodId: string) =>
+    (grid?.lessons ?? []).filter((l) => l.day === day && l.period_id === periodId);
 
   return (
     <div className="space-y-5">
@@ -140,6 +144,37 @@ export default function TimetablePage() {
             : "The week's lesson grid. Fiyox refuses any clash — a class cannot be in two lessons at once, and a teacher cannot be in two classrooms at once."}
         </p>
       </header>
+
+      {isFamily && multiWard && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button onClick={() => setArmId("")}
+                  className={`rounded-full border px-3 py-1 text-xs ${
+                    !armId ? "bg-ink text-white border-ink"
+                           : "border-line bg-white text-ink-soft hover:border-ink"}`}>
+            All children
+          </button>
+          {wards.map((w) => (
+            <button key={w.student_id} onClick={() => setArmId(w.arm_id)}
+                    className={`rounded-full border px-3 py-1 text-xs ${
+                      armId === w.arm_id ? "bg-ink text-white border-ink"
+                                         : "border-line bg-white text-ink-soft hover:border-ink"}`}>
+              {w.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {isFamily && wards.length === 1 && (
+        <p className="text-xs text-ink-soft">
+          {wards[0].name}&apos;s week.
+        </p>
+      )}
+
+      {isFamily && wards.length === 0 && (
+        <p className="text-sm text-ink-soft border border-dashed border-line rounded-lg p-6 max-w-xl">
+          No children are linked to your account yet. Ask the school to link them.
+        </p>
+      )}
 
       {isAdmin && (
         <div className="flex flex-wrap items-end gap-3">
@@ -244,13 +279,15 @@ export default function TimetablePage() {
                         </td>
                       );
                     }
-                    const l = cell(d, p.id);
+                    const here = cellAll(d, p.id);
                     return (
                       <td key={d} className="px-2 py-1.5 align-top">
-                        {l ? (
-                          <div className="rounded border border-line bg-white px-2 py-1.5">
+                        {here.length > 0 ? (
+                          <div className="space-y-1">
+                            {here.map((l) => (
+                          <div key={l.id} className="rounded border border-line bg-white px-2 py-1.5">
                             <div className="font-medium">{l.subject_name}</div>
-                            {isTeacher && (
+                            {(isTeacher || (isFamily && !armId && multiWard)) && (
                               <div className="text-xs text-ink-soft">{l.arm_label}</div>
                             )}
                             {l.teacher_name && !isTeacher && (
@@ -263,6 +300,8 @@ export default function TimetablePage() {
                                 remove
                               </button>
                             )}
+                          </div>
+                            ))}
                           </div>
                         ) : isAdmin ? (
                           <button

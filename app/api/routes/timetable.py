@@ -226,25 +226,56 @@ async def get_timetable(
     if not arm_id and not teacher_id and user.role == Role.TEACHER:
         teacher_id = user.id
 
-    # a parent/student with no arm given: use their ward's class
-    if not arm_id and not teacher_id and user.role in (Role.PARENT, Role.STUDENT):
+    # ---- families: a parent may have SEVERAL children in the school ----
+    # Return every ward's class, and let a parent ask only for a class one of
+    # their own children actually sits in. The arm is derived from the family,
+    # never taken on trust from the request.
+    wards: list[dict] = []
+    if user.role in (Role.PARENT, Role.STUDENT):
         from app.models.student import Guardian, Student
+
         if user.role == Role.STUDENT:
-            st = (await db.execute(select(Student).where(
+            students = (await db.execute(select(Student).where(
                 Student.school_id == school_id,
-                Student.user_id == user.id))).scalars().first()
+                Student.user_id == user.id,
+                Student.deleted_at.is_(None)))).scalars().all()
         else:
-            link = (await db.execute(select(Guardian).where(
+            links = (await db.execute(select(Guardian).where(
                 Guardian.school_id == school_id,
-                Guardian.parent_user_id == user.id))).scalars().first()
-            st = await db.get(Student, link.student_id) if link else None
-        if st:
-            arm_id = st.current_arm_id
+                Guardian.parent_user_id == user.id))).scalars().all()
+            students = []
+            for link in links:
+                st = await db.get(Student, link.student_id)
+                if st and st.deleted_at is None and st.current_arm_id:
+                    students.append(st)
+
+        allowed_arms = {s.current_arm_id for s in students if s.current_arm_id}
+
+        if arm_id and arm_id not in allowed_arms:
+            raise HTTPException(
+                status_code=403,
+                detail="You can only view the timetable of a class your child is in")
+
+        # a parent may not browse teachers' personal timetables
+        teacher_id = None
+
+        for s in students:
+            wards.append({"student_id": s.id,
+                          "name": f"{s.first_name} {s.last_name}",
+                          "arm_id": s.current_arm_id})
+
+        if not arm_id:
+            # no class chosen: show every ward's lessons, tagged by class
+            arm_filter = list(allowed_arms)
+        else:
+            arm_filter = [arm_id]
+    else:
+        arm_filter = [arm_id] if arm_id else []
 
     stmt = select(Lesson).where(Lesson.school_id == school_id,
                                 Lesson.deleted_at.is_(None))
-    if arm_id:
-        stmt = stmt.where(Lesson.arm_id == arm_id)
+    if arm_filter:
+        stmt = stmt.where(Lesson.arm_id.in_(arm_filter))
     if teacher_id:
         stmt = stmt.where(Lesson.teacher_id == teacher_id)
     lessons = (await db.execute(stmt)).scalars().all()
@@ -267,6 +298,7 @@ async def get_timetable(
         return f"{classes.get(a.class_id, '')} {a.name}".strip() if a else "?"
 
     return {
+        "wards": wards,              # every child this caller may view
         "days": WEEKDAY_ORDER[:5],   # Mon-Fri; Saturday only if a school uses it
         "periods": [{"id": p.id, "name": p.name, "sequence": p.sequence,
                      "start_time": _fmt(p.start_time), "end_time": _fmt(p.end_time),
