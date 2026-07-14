@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from io import BytesIO
 from sqlalchemy import func, select
+from app.core.config import settings
 from app.core.deps import DbDep, require_roles, tenant_scope
 from app.models.school import School, User, Role
 from app.models.student import Student
@@ -250,10 +251,16 @@ async def init_online_payment(invoice_id: str, db: DbDep, user: CurrentUser):
             detail="Online payments are not enabled yet — please pay at the school bursary")
 
     reference = f"PSK-{inv.invoice_number}-{_uuid.uuid4().hex[:8]}"
+    # bring the parent back to their wards page after paying; the money itself
+    # is recorded by the signed webhook, not by this redirect
+    origin = (settings.FRONTEND_ORIGIN or "").split(",")[0].strip().rstrip("/")
+    callback = f"{origin}/dashboard/wards?paid=1" if origin and origin != "*" else None
+
     url, err = await initialize_payment(
         email=user.email, amount_kobo=int(round(balance * 100)),
         reference=reference,
-        metadata={"invoice_id": inv.id, "school_id": school_id})
+        metadata={"invoice_id": inv.id, "school_id": school_id},
+        callback_url=callback)
     if err:
         raise HTTPException(status_code=502, detail=f"Payment gateway error: {err}")
     return {"authorization_url": url, "reference": reference, "amount": balance}

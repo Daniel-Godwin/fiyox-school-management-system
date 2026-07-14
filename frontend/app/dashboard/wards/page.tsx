@@ -27,6 +27,19 @@ export default function WardsPage() {
   const [results, setResults] = useState<Record<string, ResultState>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [justPaid, setJustPaid] = useState(false);
+
+  // Paystack returns the parent here with ?paid=1 after checkout. The payment
+  // itself is recorded by the signed webhook, so we simply reassure and refresh —
+  // the balance updates as soon as Paystack's call lands (usually seconds).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("paid") === "1") {
+      setJustPaid(true);
+      window.history.replaceState({}, "", "/dashboard/wards");
+    }
+  }, []);
 
   useEffect(() => {
     Promise.all([api<Term[]>("/api/academics/terms"), api<Ward[]>("/api/my/wards")])
@@ -115,6 +128,17 @@ export default function WardsPage() {
           ))}
         </select>
       </label>
+
+      {justPaid && (
+        <div className="rounded-lg border border-ledger/40 bg-ledger/10 p-3 text-sm">
+          <b>Thank you — your payment is being confirmed.</b>
+          <span className="block text-xs text-ink-soft mt-0.5">
+            The balance below updates as soon as the school&apos;s system confirms it
+            with Paystack, usually within a few seconds. Refresh if it still shows
+            the old balance.
+          </span>
+        </div>
+      )}
 
       {error && <p role="alert" className="text-sm text-sanction">{error}</p>}
 

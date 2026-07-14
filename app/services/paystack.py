@@ -22,8 +22,14 @@ def gateway_configured() -> bool:
 
 
 async def initialize_payment(*, email: str, amount_kobo: int, reference: str,
-                             metadata: dict) -> tuple[str | None, str | None]:
-    """Returns (authorization_url, error)."""
+                             metadata: dict,
+                             callback_url: str | None = None) -> tuple[str | None, str | None]:
+    """Returns (authorization_url, error).
+
+    callback_url is where Paystack sends the parent's browser after payment.
+    It is only a redirect for the human — the money is recorded by the webhook,
+    which is signed and cannot be faked by anyone poking at this URL.
+    """
     if not gateway_configured():
         return None, "Online payments are not configured yet"
     payload = {
@@ -33,6 +39,8 @@ async def initialize_payment(*, email: str, amount_kobo: int, reference: str,
         "metadata": metadata,
         "currency": "NGN",
     }
+    if callback_url:
+        payload["callback_url"] = callback_url
     headers = {"Authorization": f"Bearer {settings.PAYSTACK_SECRET_KEY}"}
     try:
         async with httpx.AsyncClient(timeout=20) as client:
