@@ -9,6 +9,12 @@ type UserRow = {
   phone: string | null; is_active: boolean;
 };
 type Student = { id: string; admission_number: string; first_name: string; last_name: string };
+type Arm = { id: string; label: string };
+type Subject = { id: string; name: string };
+type Assignment = {
+  id: string; teacher_id: string; teacher_name: string;
+  subject_id: string; subject_name: string; arm_id: string; class_label: string;
+};
 
 const ROLES: { value: Role; label: string }[] = [
   { value: "teacher", label: "Teacher" },
@@ -29,18 +35,28 @@ export default function UsersPage() {
     email: "", role: "teacher" as Role, first_name: "", last_name: "",
     phone: "", password: "", student_id: "", ward_ids: [] as string[],
   });
+  const [arms, setArms] = useState<Arm[]>([]);
+  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [asg, setAsg] = useState({ teacher_id: "", subject_id: "", arm_id: "" });
   const [reveal, setReveal] = useState<{ email: string; temp: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [u, s] = await Promise.all([
+      const [u, s, a, subj, asgs] = await Promise.all([
         api<UserRow[]>(`/api/users${filter ? `?role=${filter}` : ""}`),
         api<Student[]>("/api/students"),
+        api<Arm[]>("/api/academics/arms"),
+        api<Subject[]>("/api/academics/subjects"),
+        api<Assignment[]>("/api/users/assignments"),
       ]);
       setUsers(u);
       setStudents(s);
+      setArms(a);
+      setSubjects(subj);
+      setAssignments(asgs);
     } catch (e) {
       setNotice({
         kind: "err",
@@ -60,6 +76,37 @@ export default function UsersPage() {
         ? f.ward_ids.filter((w) => w !== id)
         : [...f.ward_ids, id],
     }));
+  }
+
+  async function addAssignment() {
+    if (!asg.teacher_id || !asg.subject_id || !asg.arm_id) {
+      setNotice({ kind: "err", text: "Pick a teacher, a subject and a class." });
+      return;
+    }
+    setBusy("assign"); setNotice(null);
+    try {
+      await api("/api/users/assignments", {
+        method: "POST", body: JSON.stringify(asg),
+      });
+      setNotice({ kind: "ok", text: "Assigned. Only this teacher can now enter those scores." });
+      setAsg({ teacher_id: "", subject_id: "", arm_id: "" });
+      await load();
+    } catch (e) {
+      setNotice({
+        kind: "err",
+        text: e instanceof ApiError ? e.message : "Could not assign the teacher.",
+      });
+    } finally { setBusy(null); }
+  }
+
+  async function removeAssignment(id: string, who: string) {
+    setBusy(`a-${id}`); setNotice(null);
+    try {
+      await api(`/api/users/assignments/${id}`, { method: "DELETE" });
+      setNotice({ kind: "ok", text: `${who} can no longer enter those scores.` });
+      await load();
+    } catch { setNotice({ kind: "err", text: "Could not remove the assignment." }); }
+    finally { setBusy(null); }
   }
 
   async function createUser() {
@@ -227,6 +274,72 @@ export default function UsersPage() {
               Copy it now and share it securely — it will not be shown again.
             </span>
           </div>
+        )}
+      </section>
+
+      {/* teaching assignments */}
+      <section className="rounded-lg border border-line bg-card p-4 space-y-3 max-w-3xl">
+        <div>
+          <p className="text-sm font-medium">Teaching assignments</p>
+          <p className="text-xs text-ink-soft">
+            A teacher can only enter or view scores for the subjects and classes
+            assigned here — nobody can alter another teacher&apos;s marks. Admins
+            are not restricted and can correct any sheet.
+          </p>
+        </div>
+
+        {assignments.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {assignments.map((a) => (
+              <span key={a.id}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-line bg-paper px-3 py-1 text-xs">
+                <b>{a.teacher_name}</b> · {a.subject_name} · {a.class_label}
+                <button
+                  onClick={() => {
+                    if (confirm(`Remove ${a.teacher_name} from ${a.subject_name} (${a.class_label})?`))
+                      removeAssignment(a.id, a.teacher_name);
+                  }}
+                  disabled={busy !== null}
+                  aria-label="Remove assignment"
+                  className="text-ink-soft hover:text-sanction disabled:opacity-40"
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+          <select value={asg.teacher_id}
+                  onChange={(e) => setAsg({ ...asg, teacher_id: e.target.value })}
+                  className="rounded border border-line px-2 py-1.5 text-sm bg-white">
+            <option value="">Teacher…</option>
+            {users.filter((u) => u.role === "teacher" && u.is_active).map((u) => (
+              <option key={u.id} value={u.id}>{u.first_name} {u.last_name}</option>
+            ))}
+          </select>
+          <select value={asg.subject_id}
+                  onChange={(e) => setAsg({ ...asg, subject_id: e.target.value })}
+                  className="rounded border border-line px-2 py-1.5 text-sm bg-white">
+            <option value="">Subject…</option>
+            {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <select value={asg.arm_id}
+                  onChange={(e) => setAsg({ ...asg, arm_id: e.target.value })}
+                  className="rounded border border-line px-2 py-1.5 text-sm bg-white">
+            <option value="">Class…</option>
+            {arms.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+          </select>
+          <button onClick={addAssignment} disabled={busy !== null}
+                  className="rounded-md bg-ink text-white px-4 py-2 text-sm font-medium hover:bg-ink-soft disabled:opacity-50">
+            {busy === "assign" ? "Assigning…" : "Assign"}
+          </button>
+        </div>
+        {users.filter((u) => u.role === "teacher").length === 0 && (
+          <p className="text-xs text-ink-soft">
+            Create a teacher account above first, then assign their subjects here.
+          </p>
         )}
       </section>
 

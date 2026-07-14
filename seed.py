@@ -13,7 +13,7 @@ from app.models.school import School, User, Role
 from app.models.academics import (
     AcademicSession, Term, SchoolClass, ClassArm, Subject, ClassCategory, TermName,
 )
-from app.models.student import Student, Guardian, Gender
+from app.models.student import Student, Guardian, TeachingAssignment, Gender
 from app.models.results import AssessmentComponent, ScoreEntry
 
 random.seed(42)
@@ -42,10 +42,11 @@ async def main():
                     hashed_password=hash_password("bursar123"),
                     role=Role.BURSAR, first_name="Chika", last_name="Nwosu",
                     phone="+2348010000009"))
-        db.add(User(school_id=school.id, email="teacher@gss-ikeja.ng",
-                    hashed_password=hash_password("teach123"),
-                    role=Role.TEACHER, first_name="Tunde", last_name="Bello",
-                    phone="+2348010000001"))
+        teacher = User(school_id=school.id, email="teacher@gss-ikeja.ng",
+                       hashed_password=hash_password("teach123"),
+                       role=Role.TEACHER, first_name="Tunde", last_name="Bello",
+                       phone="+2348010000001")
+        db.add(teacher)
         parent = User(school_id=school.id, email="parent@gss-ikeja.ng",
                       hashed_password=hash_password("parent123"),
                       role=Role.PARENT, first_name="Mama", last_name="Chinedu",
@@ -100,6 +101,15 @@ async def main():
             db.add(st)
             students.append(st)
         await db.flush()
+
+        # the teacher owns the Mathematics sheet for JSS1 A — score entry is
+        # denied without an assignment, exactly as in a real school
+        for subj in subjects:
+            if subj.name == "Mathematics":
+                db.add(TeachingAssignment(school_id=school.id,
+                                          teacher_id=teacher.id,
+                                          subject_id=subj.id, arm_id=arm.id))
+
         db.add(Guardian(school_id=school.id, parent_user_id=parent.id,
                         student_id=students[0].id, relationship="Mother"))
 

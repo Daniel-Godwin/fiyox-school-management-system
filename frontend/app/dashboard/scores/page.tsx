@@ -7,6 +7,11 @@ type Term = { id: string; name: string; session: string; is_current: boolean };
 type Arm = { id: string; label: string };
 type Subject = { id: string; name: string };
 type Component = { id: string; name: string; max_score: number; sequence: number };
+type Assignment = {
+  id: string; subject_id: string; subject_name: string;
+  arm_id: string; class_label: string;
+};
+type Me = { role: string };
 type Student = {
   id: string; admission_number: string; first_name: string; last_name: string;
   current_arm_id: string | null;
@@ -27,6 +32,8 @@ export default function ScoreEntryPage() {
   const [components, setComponents] = useState<Component[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [cells, setCells] = useState<Record<string, string>>({});
+  const [me, setMe] = useState<Me | null>(null);
+  const [assignments, setAssignments] = useState<Assignment[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
@@ -34,17 +41,32 @@ export default function ScoreEntryPage() {
   // load selectors once
   useEffect(() => {
     Promise.all([
+      api<Me>("/api/auth/me"),
       api<Term[]>("/api/academics/terms"),
       api<Arm[]>("/api/academics/arms"),
       api<Subject[]>("/api/academics/subjects"),
-    ]).then(([t, a, s]) => {
+      api<Assignment[]>("/api/users/assignments"),
+    ]).then(([u, t, a, s, asg]) => {
+      setMe(u);
       setTerms(t);
       setArms(a);
       setSubjects(s);
+      setAssignments(asg);
       const current = t.find((x) => x.is_current);
       if (current) setTermId(current.id);
     }).catch(() => setNotice({ kind: "err", text: "Could not load class lists. Is the backend running?" }));
   }, []);
+
+  const isTeacher = me?.role === "teacher";
+
+  // a teacher may only enter scores for what they are assigned to teach
+  const allowedArms = isTeacher && assignments
+    ? arms.filter((a) => assignments.some((x) => x.arm_id === a.id))
+    : arms;
+  const allowedSubjects = isTeacher && assignments
+    ? subjects.filter((s) => assignments.some(
+        (x) => x.subject_id === s.id && (!armId || x.arm_id === armId)))
+    : subjects;
 
   const ready = termId && armId && subjectId;
 
@@ -158,9 +180,9 @@ export default function ScoreEntryPage() {
           { label: "Term", value: termId, set: setTermId,
             opts: terms.map((t) => ({ id: t.id, label: `${t.name} term · ${t.session}` })) },
           { label: "Class", value: armId, set: setArmId,
-            opts: arms.map((a) => ({ id: a.id, label: a.label })) },
+            opts: allowedArms.map((a) => ({ id: a.id, label: a.label })) },
           { label: "Subject", value: subjectId, set: setSubjectId,
-            opts: subjects.map((s) => ({ id: s.id, label: s.name })) },
+            opts: allowedSubjects.map((s) => ({ id: s.id, label: s.name })) },
         ].map((f) => (
           <label key={f.label} className="block">
             <span className="block text-xs font-medium text-ink-soft mb-1">{f.label}</span>
@@ -177,6 +199,20 @@ export default function ScoreEntryPage() {
           </label>
         ))}
       </div>
+
+      {isTeacher && assignments && assignments.length === 0 && (
+        <p className="text-sm text-sanction border border-sanction/30 bg-sanction/5 rounded-lg p-4 max-w-3xl">
+          You have not been assigned any subjects yet. Only the subjects you teach
+          appear here — ask the school admin to assign you.
+        </p>
+      )}
+
+      {isTeacher && assignments && assignments.length > 0 && (
+        <p className="text-xs text-ink-soft">
+          You can enter scores for:{" "}
+          {assignments.map((a) => `${a.subject_name} (${a.class_label})`).join(" · ")}
+        </p>
+      )}
 
       {!ready && (
         <p className="text-sm text-ink-soft border border-dashed border-line rounded-lg p-6 max-w-3xl">

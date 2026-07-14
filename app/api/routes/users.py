@@ -164,3 +164,128 @@ async def link_ward(
                        ip_address=request.client.host if request.client else None)
     await db.commit()
     return {"linked": True}
+
+
+# ---------- Teaching assignments: who teaches what, to whom ----------
+"""The school admin decides which teacher owns which (subject, arm) score sheet.
+
+This is what stops the Maths teacher from altering the English teacher's marks:
+score entry is denied unless the teacher holds the matching assignment.
+"""
+from datetime import datetime, timezone
+from pydantic import BaseModel
+from app.models.academics import ClassArm, SchoolClass, Subject
+from app.models.student import TeachingAssignment
+
+
+class AssignmentIn(BaseModel):
+    teacher_id: str
+    subject_id: str
+    arm_id: str
+
+
+@router.post("/assignments", status_code=status.HTTP_201_CREATED)
+async def assign_teacher(
+    payload: AssignmentIn, request: Request, db: DbDep,
+    admin: Annotated[User, AdminOnly],
+):
+    school_id = tenant_scope(admin)
+
+    teacher = await db.get(User, payload.teacher_id)
+    if not teacher or teacher.school_id != school_id or teacher.role != Role.TEACHER:
+        raise HTTPException(status_code=404, detail="Teacher not found")
+    subject = await db.get(Subject, payload.subject_id)
+    if not subject or subject.school_id != school_id:
+        raise HTTPException(status_code=404, detail="Subject not found")
+    arm = await db.get(ClassArm, payload.arm_id)
+    if not arm or arm.school_id != school_id:
+        raise HTTPException(status_code=404, detail="Class not found")
+
+    dup = (await db.execute(select(TeachingAssignment).where(
+        TeachingAssignment.school_id == school_id,
+        TeachingAssignment.teacher_id == payload.teacher_id,
+        TeachingAssignment.subject_id == payload.subject_id,
+        TeachingAssignment.arm_id == payload.arm_id,
+        TeachingAssignment.deleted_at.is_(None)))).scalars().first()
+    if dup:
+        raise HTTPException(status_code=409,
+                            detail="This teacher already has that subject in that class")
+
+    ta = TeachingAssignment(school_id=school_id, teacher_id=payload.teacher_id,
+                            subject_id=payload.subject_id, arm_id=payload.arm_id,
+                            created_by=admin.id)
+    db.add(ta)
+    await db.flush()
+    await record_audit(db, school_id=school_id, user_id=admin.id, action="create",
+                       table_name="teaching_assignments", record_id=ta.id,
+                       changes={"teacher": {"old": None, "new": teacher.email},
+                                "subject": {"old": None, "new": subject.name},
+                                "arm": {"old": None, "new": arm.id}},
+                       ip_address=request.client.host if request.client else None)
+    await db.commit()
+    return {"id": ta.id, "teacher_id": ta.teacher_id,
+            "subject_id": ta.subject_id, "arm_id": ta.arm_id}
+
+
+@router.get("/assignments")
+async def list_assignments(
+    db: DbDep,
+    user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN, Role.TEACHER))],
+    teacher_id: str | None = Query(None),
+):
+    """Admins see everything; a teacher sees only their own assignments."""
+    school_id = tenant_scope(user)
+    stmt = select(TeachingAssignment).where(
+        TeachingAssignment.school_id == school_id,
+        TeachingAssignment.deleted_at.is_(None))
+    if user.role == Role.TEACHER:
+        stmt = stmt.where(TeachingAssignment.teacher_id == user.id)
+    elif teacher_id:
+        stmt = stmt.where(TeachingAssignment.teacher_id == teacher_id)
+
+    rows = (await db.execute(stmt)).scalars().all()
+
+    subjects = {s.id: s.name for s in (await db.execute(select(Subject).where(
+        Subject.school_id == school_id))).scalars().all()}
+    arms = {a.id: a for a in (await db.execute(select(ClassArm).where(
+        ClassArm.school_id == school_id))).scalars().all()}
+    classes = {c.id: c.name for c in (await db.execute(select(SchoolClass).where(
+        SchoolClass.school_id == school_id))).scalars().all()}
+    teachers = {u.id: f"{u.first_name} {u.last_name}"
+                for u in (await db.execute(select(User).where(
+                    User.school_id == school_id))).scalars().all()}
+
+    out = []
+    for ta in rows:
+        arm = arms.get(ta.arm_id)
+        out.append({
+            "id": ta.id,
+            "teacher_id": ta.teacher_id,
+            "teacher_name": teachers.get(ta.teacher_id, "?"),
+            "subject_id": ta.subject_id,
+            "subject_name": subjects.get(ta.subject_id, "?"),
+            "arm_id": ta.arm_id,
+            "class_label": (f"{classes.get(arm.class_id, '')} {arm.name}".strip()
+                            if arm else "?"),
+        })
+    return sorted(out, key=lambda x: (x["teacher_name"], x["class_label"]))
+
+
+@router.delete("/assignments/{assignment_id}")
+async def unassign_teacher(
+    assignment_id: str, request: Request, db: DbDep,
+    admin: Annotated[User, AdminOnly],
+):
+    school_id = tenant_scope(admin)
+    ta = await db.get(TeachingAssignment, assignment_id)
+    if not ta or ta.school_id != school_id or ta.deleted_at:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    ta.deleted_at = datetime.now(timezone.utc)
+    ta.updated_by = admin.id
+    await record_audit(db, school_id=school_id, user_id=admin.id, action="delete",
+                       table_name="teaching_assignments", record_id=ta.id,
+                       changes={"teacher_id": {"old": ta.teacher_id, "new": None}},
+                       ip_address=request.client.host if request.client else None)
+    await db.commit()
+    return {"removed": True,
+            "note": "This teacher can no longer enter scores for that subject and class."}

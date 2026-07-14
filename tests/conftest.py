@@ -22,7 +22,7 @@ from app.models.school import School, User, Role
 from app.models.academics import (
     AcademicSession, Term, SchoolClass, ClassArm, Subject, ClassCategory, TermName,
 )
-from app.models.student import Student, Gender
+from app.models.student import Student, TeachingAssignment, Gender
 from app.models.results import AssessmentComponent
 
 
@@ -42,10 +42,11 @@ async def _seed(TestSession) -> dict:
         db.add(User(school_id=school.id, email="admin@gss-ikeja.ng",
                     hashed_password=hash_password("admin123"),
                     role=Role.SCHOOL_ADMIN, first_name="Amaka", last_name="Okoro"))
-        db.add(User(school_id=school.id, email="teacher@gss-ikeja.ng",
-                    hashed_password=hash_password("teach123"),
-                    role=Role.TEACHER, first_name="Tunde", last_name="Bello",
-                    phone="+2348010000001"))
+        teacher = User(school_id=school.id, email="teacher@gss-ikeja.ng",
+                       hashed_password=hash_password("teach123"),
+                       role=Role.TEACHER, first_name="Tunde", last_name="Bello",
+                       phone="+2348010000001")
+        db.add(teacher)
 
         session = AcademicSession(school_id=school.id, name="2025/2026", is_current=True)
         db.add(session)
@@ -69,6 +70,11 @@ async def _seed(TestSession) -> dict:
         db.add(subj)
         await db.flush()
         ids["subject_id"] = subj.id
+        ids["teacher_id"] = teacher.id
+        # the demo teacher owns the Mathematics sheet for this arm; without an
+        # assignment, score entry is denied (see test_score_access.py)
+        db.add(TeachingAssignment(school_id=school.id, teacher_id=teacher.id,
+                                  subject_id=subj.id, arm_id=arm.id))
 
         comps = []
         for seq, (n, mx, ex) in enumerate([

@@ -17,6 +17,7 @@ from app.services.results import compute_term
 from app.services.report import build_report_data
 from app.services.report_pdf import build_report_pdf
 from app.services.audit import record_audit
+from app.services.teaching import assert_may_touch_scores
 
 router = APIRouter(prefix="/api")
 
@@ -55,6 +56,8 @@ async def get_scores(
 ):
     """Existing raw scores for one arm+subject+term — used to prefill the entry grid."""
     school_id = tenant_scope(user)
+    # a teacher may only see the sheets they actually teach
+    await assert_may_touch_scores(db, user, school_id, subject_id, arm_id)
     rows = (await db.execute(select(ScoreEntry).where(
         ScoreEntry.school_id == school_id,
         ScoreEntry.arm_id == arm_id,
@@ -70,6 +73,10 @@ async def enter_scores(
     user: Annotated[User, Depends(require_roles(Role.TEACHER, Role.SCHOOL_ADMIN))],
 ):
     school_id = tenant_scope(user)
+    # THE GUARD: a teacher may only write scores for a subject+arm they teach.
+    # Without this, any teacher could alter any other teacher's marks.
+    await assert_may_touch_scores(db, user, school_id,
+                                  payload.subject_id, payload.arm_id)
     ip = request.client.host if request.client else None
     written = 0
     for row in payload.rows:
