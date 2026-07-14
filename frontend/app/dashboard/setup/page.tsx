@@ -176,6 +176,22 @@ export default function SetupPage() {
     finally { setBusy(null); }
   }
 
+  async function closeArm(armId: string, label: string) {
+    setBusy(`arm-${armId}`); setNotice(null);
+    try {
+      await api(`/api/academics/arms/${armId}`, { method: "DELETE" });
+      setNotice({ kind: "ok", text: `${label} closed.` });
+      await load();
+    } catch (e) {
+      setNotice({
+        kind: "err",
+        text: e instanceof ApiError
+          ? e.message      // e.g. "3 student(s) are still in this arm. Move them first."
+          : "Could not close the arm.",
+      });
+    } finally { setBusy(null); }
+  }
+
   async function addSubject() {
     if (!newSubject.name.trim()) return;
     setBusy("subject"); setNotice(null);
@@ -392,14 +408,31 @@ export default function SetupPage() {
           {arms.length === 0 ? (
             <p className="text-sm text-ink-soft">None yet.</p>
           ) : (
-            <div className="flex flex-wrap gap-1.5">
-              {arms.map((a) => (
-                <span key={a.id}
-                      className="rounded-full border border-line bg-paper px-3 py-1 text-xs">
-                  {a.label}
-                </span>
-              ))}
-            </div>
+            <>
+              <div className="flex flex-wrap gap-1.5">
+                {arms.map((a) => (
+                  <span key={a.id}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-line bg-paper px-3 py-1 text-xs">
+                    {a.label}
+                    <button
+                      onClick={() => {
+                        if (confirm(`Close ${a.label}? This is refused if students are still in it.`))
+                          closeArm(a.id, a.label);
+                      }}
+                      disabled={busy !== null}
+                      aria-label={`Close ${a.label}`}
+                      className="text-ink-soft hover:text-sanction disabled:opacity-40"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <p className="text-xs text-ink-soft">
+                Closing an arm is refused while students are in it — move them to
+                another arm first, so results and invoices are never orphaned.
+              </p>
+            </>
           )}
           <div className="flex flex-wrap items-end gap-2 pt-1">
             <label className="block">

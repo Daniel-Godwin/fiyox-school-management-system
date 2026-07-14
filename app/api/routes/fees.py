@@ -293,3 +293,210 @@ async def paystack_webhook(request: Request, db: DbDep):
     if err:
         raise HTTPException(status_code=400, detail=err)
     return {"received": True, "duplicate": res["duplicate"]}
+
+
+# ---------- Fee maintenance: schools change their minds ----------
+"""A school raises its fees, drops a category, or corrects a mistake.
+
+The rule throughout: **money already collected is never rewritten.** An invoice
+snapshots its amount when generated, so editing a fee structure changes what
+*future* invoices will say, not what a parent already owes or paid. To push a
+change onto existing bills the admin must ask for it explicitly (re-issue), and
+even then an invoice can never be reduced below what has already been paid.
+"""
+from datetime import datetime, timezone
+from pydantic import BaseModel, Field
+from app.models.academics import ClassArm
+from app.models.fees import FeeCategory, FeeStructure, Invoice, InvoiceStatus
+from app.services.fees import paid_total, status_for
+from app.services.audit import record_audit
+
+
+class CategoryUpdate(BaseModel):
+    name: str
+
+
+class StructureUpdate(BaseModel):
+    amount: float = Field(gt=0)
+
+
+class ReissueIn(BaseModel):
+    term_id: str
+    class_id: str
+
+
+@router.patch("/categories/{category_id}", response_model=CategoryOut)
+async def rename_category(
+    category_id: str, payload: CategoryUpdate, request: Request, db: DbDep,
+    user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN, Role.BURSAR))],
+):
+    school_id = tenant_scope(user)
+    cat = await db.get(FeeCategory, category_id)
+    if not cat or cat.school_id != school_id or cat.deleted_at:
+        raise HTTPException(status_code=404, detail="Category not found")
+    old = cat.name
+    cat.name = payload.name
+    cat.updated_by = user.id
+    await record_audit(db, school_id=school_id, user_id=user.id, action="update",
+                       table_name="fee_categories", record_id=cat.id,
+                       changes={"name": {"old": old, "new": payload.name}},
+                       ip_address=request.client.host if request.client else None)
+    await db.commit()
+    await db.refresh(cat)
+    return cat
+
+
+@router.delete("/categories/{category_id}")
+async def retire_category(
+    category_id: str, request: Request, db: DbDep,
+    user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN))],
+):
+    """Retire a category (soft delete). Fees already charged under it stay on
+    the invoices that carry them — history is not rewritten."""
+    school_id = tenant_scope(user)
+    cat = await db.get(FeeCategory, category_id)
+    if not cat or cat.school_id != school_id or cat.deleted_at:
+        raise HTTPException(status_code=404, detail="Category not found")
+
+    # soft-delete the category and any live fee structures using it
+    live = (await db.execute(select(FeeStructure).where(
+        FeeStructure.school_id == school_id,
+        FeeStructure.category_id == category_id,
+        FeeStructure.deleted_at.is_(None)))).scalars().all()
+    now = datetime.now(timezone.utc)
+    for s in live:
+        s.deleted_at = now
+        s.updated_by = user.id
+    cat.deleted_at = now
+    cat.updated_by = user.id
+
+    await record_audit(db, school_id=school_id, user_id=user.id, action="delete",
+                       table_name="fee_categories", record_id=cat.id,
+                       changes={"name": {"old": cat.name, "new": None},
+                                "structures_removed": {"old": len(live), "new": 0}},
+                       ip_address=request.client.host if request.client else None)
+    await db.commit()
+    return {"retired": True, "structures_removed": len(live),
+            "note": "Existing invoices are unchanged. Re-issue to apply the new total."}
+
+
+@router.patch("/structures/{structure_id}", response_model=StructureOut)
+async def change_fee_amount(
+    structure_id: str, payload: StructureUpdate, request: Request, db: DbDep,
+    user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN))],
+):
+    """Change what a class pays for a category this term (e.g. a fee increment).
+    Existing invoices keep their snapshotted amount until you re-issue."""
+    school_id = tenant_scope(user)
+    st = await db.get(FeeStructure, structure_id)
+    if not st or st.school_id != school_id or st.deleted_at:
+        raise HTTPException(status_code=404, detail="Fee not found")
+    old = st.amount
+    st.amount = payload.amount
+    st.updated_by = user.id
+    await record_audit(db, school_id=school_id, user_id=user.id, action="update",
+                       table_name="fee_structures", record_id=st.id,
+                       changes={"amount": {"old": old, "new": payload.amount}},
+                       ip_address=request.client.host if request.client else None)
+    await db.commit()
+    await db.refresh(st)
+    return st
+
+
+@router.delete("/structures/{structure_id}")
+async def remove_fee(
+    structure_id: str, request: Request, db: DbDep,
+    user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN))],
+):
+    """Remove a fee from a class for this term (soft delete)."""
+    school_id = tenant_scope(user)
+    st = await db.get(FeeStructure, structure_id)
+    if not st or st.school_id != school_id or st.deleted_at:
+        raise HTTPException(status_code=404, detail="Fee not found")
+    st.deleted_at = datetime.now(timezone.utc)
+    st.updated_by = user.id
+    await record_audit(db, school_id=school_id, user_id=user.id, action="delete",
+                       table_name="fee_structures", record_id=st.id,
+                       changes={"amount": {"old": st.amount, "new": None}},
+                       ip_address=request.client.host if request.client else None)
+    await db.commit()
+    return {"removed": True,
+            "note": "Existing invoices are unchanged. Re-issue to apply the new total."}
+
+
+@router.post("/invoices/reissue")
+async def reissue_invoices(
+    payload: ReissueIn, request: Request, db: DbDep,
+    user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN))],
+):
+    """Apply the *current* fee structure to invoices already issued for a class.
+
+    Safety rules, in order:
+      - fully paid invoices are left alone (a settled bill stays settled);
+      - an invoice is never reduced below what has already been paid;
+      - every change is audited old -> new.
+    """
+    school_id = tenant_scope(user)
+    ip = request.client.host if request.client else None
+
+    new_total = (await db.execute(
+        select(func.coalesce(func.sum(FeeStructure.amount), 0.0)).where(
+            FeeStructure.school_id == school_id,
+            FeeStructure.class_id == payload.class_id,
+            FeeStructure.term_id == payload.term_id,
+            FeeStructure.deleted_at.is_(None)))).scalar() or 0.0
+
+    arms = (await db.execute(select(ClassArm).where(
+        ClassArm.school_id == school_id,
+        ClassArm.class_id == payload.class_id,
+        ClassArm.deleted_at.is_(None)))).scalars().all()
+    arm_ids = [a.id for a in arms]
+    if not arm_ids:
+        raise HTTPException(status_code=404, detail="No arms in this class")
+
+    students = (await db.execute(select(Student).where(
+        Student.school_id == school_id,
+        Student.current_arm_id.in_(arm_ids),
+        Student.deleted_at.is_(None)))).scalars().all()
+    student_ids = [s.id for s in students]
+    if not student_ids:
+        return {"updated": 0, "skipped_paid": 0, "clamped": 0, "new_total": new_total}
+
+    invoices = (await db.execute(select(Invoice).where(
+        Invoice.school_id == school_id,
+        Invoice.term_id == payload.term_id,
+        Invoice.student_id.in_(student_ids),
+        Invoice.deleted_at.is_(None)))).scalars().all()
+
+    updated = skipped_paid = clamped = unchanged = 0
+    for inv in invoices:
+        paid = await paid_total(db, inv.id)
+        if inv.status == InvoiceStatus.PAID and paid >= inv.amount - inv.discount:
+            skipped_paid += 1
+            continue
+
+        target = new_total
+        # never bill a parent for less than they have already handed over
+        floor = round(paid + inv.discount, 2)
+        if target < floor:
+            target = floor
+            clamped += 1
+
+        if round(target, 2) == round(inv.amount, 2):
+            unchanged += 1
+            continue
+
+        old_amount = inv.amount
+        inv.amount = round(target, 2)
+        inv.updated_by = user.id
+        inv.status = status_for(inv.amount, inv.discount, paid)
+        await record_audit(db, school_id=school_id, user_id=user.id,
+                           action="update", table_name="invoices",
+                           record_id=inv.id,
+                           changes={"amount": {"old": old_amount, "new": inv.amount}},
+                           ip_address=ip)
+        updated += 1
+
+    await db.commit()
+    return {"new_total": new_total, "updated": updated, "unchanged": unchanged,
+            "skipped_paid": skipped_paid, "clamped_to_amount_paid": clamped}

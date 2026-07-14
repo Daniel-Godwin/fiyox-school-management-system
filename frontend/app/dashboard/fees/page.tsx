@@ -121,6 +121,65 @@ export default function FeesPage() {
     finally { setBusy(null); }
   }
 
+  async function updateFee(structureId: string, amount: number) {
+    setBusy(`f-${structureId}`); setNotice(null);
+    try {
+      await api(`/api/fees/structures/${structureId}`, {
+        method: "PATCH", body: JSON.stringify({ amount }),
+      });
+      setNotice({
+        kind: "ok",
+        text: "Fee updated. Existing invoices keep their old amount until you re-issue.",
+      });
+      await load();
+    } catch (e) {
+      setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not update the fee." });
+    } finally { setBusy(null); }
+  }
+
+  async function removeFee(structureId: string) {
+    setBusy(`f-${structureId}`); setNotice(null);
+    try {
+      await api(`/api/fees/structures/${structureId}`, { method: "DELETE" });
+      setNotice({ kind: "ok", text: "Fee removed. Re-issue to apply the new total to existing invoices." });
+      await load();
+    } catch { setNotice({ kind: "err", text: "Could not remove the fee." }); }
+    finally { setBusy(null); }
+  }
+
+  async function retireCategory(categoryId: string, name: string) {
+    setBusy(`c-${categoryId}`); setNotice(null);
+    try {
+      const res = await api<{ structures_removed: number }>(
+        `/api/fees/categories/${categoryId}`, { method: "DELETE" });
+      setNotice({
+        kind: "ok",
+        text: `"${name}" retired${res.structures_removed ? ` (${res.structures_removed} class fee(s) removed)` : ""}. Existing invoices are unchanged.`,
+      });
+      await load();
+    } catch { setNotice({ kind: "err", text: "Could not retire the category." }); }
+    finally { setBusy(null); }
+  }
+
+  async function reissue(classId: string) {
+    setBusy("reissue"); setNotice(null);
+    try {
+      const res = await api<{ new_total: number; updated: number; skipped_paid: number;
+                             clamped_to_amount_paid: number; unchanged: number }>(
+        "/api/fees/invoices/reissue", {
+          method: "POST",
+          body: JSON.stringify({ term_id: termId, class_id: classId }),
+        });
+      const bits = [`${res.updated} invoice(s) updated to ${ngn(res.new_total)}`];
+      if (res.skipped_paid) bits.push(`${res.skipped_paid} already settled (left alone)`);
+      if (res.clamped_to_amount_paid) bits.push(`${res.clamped_to_amount_paid} kept at the amount already paid`);
+      setNotice({ kind: "ok", text: bits.join(" · ") + "." });
+      await load();
+    } catch (e) {
+      setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not re-issue." });
+    } finally { setBusy(null); }
+  }
+
   async function addStructure() {
     const amount = Number(newStruct.amount);
     if (!newStruct.class_id || !newStruct.category_id || Number.isNaN(amount) || amount <= 0) {
@@ -257,8 +316,19 @@ export default function FeesPage() {
             <div className="flex flex-wrap items-center gap-2">
               {categories.map((c) => (
                 <span key={c.id}
-                      className="rounded-full border border-line bg-paper px-3 py-1 text-xs">
+                      className="inline-flex items-center gap-1.5 rounded-full border border-line bg-paper px-3 py-1 text-xs">
                   {c.name}
+                  <button
+                    onClick={() => {
+                      if (confirm(`Retire "${c.name}"? Fees under it are removed from future invoices. Existing invoices are not changed.`))
+                        retireCategory(c.id, c.name);
+                    }}
+                    disabled={busy !== null}
+                    aria-label={`Retire ${c.name}`}
+                    className="text-ink-soft hover:text-sanction disabled:opacity-40"
+                  >
+                    ×
+                  </button>
                 </span>
               ))}
               <input value={newCat} onChange={(e) => setNewCat(e.target.value)}
@@ -286,11 +356,60 @@ export default function FeesPage() {
                     <tr key={s.id}>
                       <td className="pr-6 py-1">{className(s.class_id)}</td>
                       <td className="pr-6 py-1">{catName(s.category_id)}</td>
-                      <td className="py-1 text-right tabular">{ngn(s.amount)}</td>
+                      <td className="py-1 text-right tabular">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          defaultValue={s.amount}
+                          disabled={busy !== null}
+                          onBlur={(e) => {
+                            const v = Number(e.target.value);
+                            if (!Number.isNaN(v) && v > 0 && v !== s.amount) updateFee(s.id, v);
+                            else e.target.value = String(s.amount);
+                          }}
+                          className="w-28 rounded border border-line px-2 py-1 text-sm text-right tabular"
+                        />
+                      </td>
+                      <td className="py-1 pl-3 text-right">
+                        <button
+                          onClick={() => {
+                            if (confirm(`Remove ${catName(s.category_id)} from ${className(s.class_id)}? Existing invoices are not changed.`))
+                              removeFee(s.id);
+                          }}
+                          disabled={busy !== null}
+                          className="text-xs text-ink-soft underline underline-offset-2 hover:text-sanction disabled:opacity-40"
+                        >
+                          Remove
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            )}
+
+            {structures.length > 0 && (
+              <div className="rounded-md border border-brass bg-brass/10 p-3 space-y-2">
+                <p className="text-xs">
+                  <b>Changed a fee?</b> Existing invoices keep the amount they were
+                  issued with — nobody&apos;s debt changes behind their back. To apply
+                  the new total to bills already issued, re-issue the class. Settled
+                  invoices are left alone, and no invoice is ever reduced below what a
+                  parent has already paid.
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  {classes.map((c) => (
+                    <button key={c.id} onClick={() => {
+                              if (confirm(`Re-issue ${c.name} invoices at the current fee total?`))
+                                reissue(c.id);
+                            }}
+                            disabled={busy !== null || !termId}
+                            className="rounded-md border border-ink text-ink px-3 py-1.5 text-xs font-medium hover:bg-ink hover:text-white disabled:opacity-40">
+                      {busy === "reissue" ? "Re-issuing…" : `Re-issue ${c.name}`}
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
 
             <div className="flex flex-wrap items-end gap-3">

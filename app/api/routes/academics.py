@@ -59,6 +59,7 @@ from fastapi import Depends, HTTPException, status
 from app.core.deps import require_roles
 from app.models.school import User, Role
 from app.models.results import AssessmentComponent
+from pydantic import BaseModel
 from app.schemas import SessionIn, TermIn, ClassIn, ArmIn, SubjectIn, QuickSetupIn
 
 AdminOnly = Depends(require_roles(Role.SCHOOL_ADMIN))
@@ -200,3 +201,133 @@ async def quick_setup(payload: QuickSetupIn, db: DbDep,
         "subjects": payload.subjects,
         "components": [c["name"] for c in DEFAULT_COMPONENTS] if payload.with_default_components else [],
     }
+
+
+# ---------- Structure maintenance: schools open and close arms ----------
+from datetime import datetime, timezone
+from app.models.student import Student
+from app.services.audit import record_audit
+
+
+class ArmRename(BaseModel):
+    name: str
+
+
+@router.patch("/arms/{arm_id}")
+async def rename_arm(arm_id: str, payload: ArmRename, db: DbDep,
+                     user: Annotated[User, AdminOnly]):
+    school_id = tenant_scope(user)
+    arm = await db.get(ClassArm, arm_id)
+    if not arm or arm.school_id != school_id or arm.deleted_at:
+        raise HTTPException(status_code=404, detail="Arm not found")
+    old = arm.name
+    arm.name = payload.name
+    arm.updated_by = user.id
+    await record_audit(db, school_id=school_id, user_id=user.id, action="update",
+                       table_name="class_arms", record_id=arm.id,
+                       changes={"name": {"old": old, "new": payload.name}})
+    await db.commit()
+    klass = await db.get(SchoolClass, arm.class_id)
+    return {"id": arm.id, "name": arm.name,
+            "label": f"{klass.name} {arm.name}" if klass else arm.name}
+
+
+@router.delete("/arms/{arm_id}")
+async def close_arm(arm_id: str, db: DbDep,
+                    user: Annotated[User, AdminOnly]):
+    """Close a class arm. Refused while students are still in it — they must be
+    moved first, or their results and invoices would be orphaned."""
+    school_id = tenant_scope(user)
+    arm = await db.get(ClassArm, arm_id)
+    if not arm or arm.school_id != school_id or arm.deleted_at:
+        raise HTTPException(status_code=404, detail="Arm not found")
+
+    occupants = (await db.execute(select(Student).where(
+        Student.school_id == school_id,
+        Student.current_arm_id == arm_id,
+        Student.deleted_at.is_(None)))).scalars().all()
+    if occupants:
+        raise HTTPException(
+            status_code=409,
+            detail=(f"{len(occupants)} student(s) are still in this arm. "
+                    "Move them to another arm first."))
+
+    arm.deleted_at = datetime.now(timezone.utc)
+    arm.updated_by = user.id
+    await record_audit(db, school_id=school_id, user_id=user.id, action="delete",
+                       table_name="class_arms", record_id=arm.id,
+                       changes={"name": {"old": arm.name, "new": None}})
+    await db.commit()
+    return {"closed": True}
+
+
+@router.delete("/classes/{class_id}")
+async def close_class(class_id: str, db: DbDep,
+                      user: Annotated[User, AdminOnly]):
+    """Close a whole class (and its arms). Refused while any arm has students."""
+    school_id = tenant_scope(user)
+    klass = await db.get(SchoolClass, class_id)
+    if not klass or klass.school_id != school_id or klass.deleted_at:
+        raise HTTPException(status_code=404, detail="Class not found")
+
+    arms = (await db.execute(select(ClassArm).where(
+        ClassArm.school_id == school_id, ClassArm.class_id == class_id,
+        ClassArm.deleted_at.is_(None)))).scalars().all()
+    arm_ids = [a.id for a in arms]
+    if arm_ids:
+        occupants = (await db.execute(select(Student).where(
+            Student.school_id == school_id,
+            Student.current_arm_id.in_(arm_ids),
+            Student.deleted_at.is_(None)))).scalars().all()
+        if occupants:
+            raise HTTPException(
+                status_code=409,
+                detail=(f"{len(occupants)} student(s) are still in this class. "
+                        "Move them first."))
+
+    now = datetime.now(timezone.utc)
+    for a in arms:
+        a.deleted_at = now
+        a.updated_by = user.id
+    klass.deleted_at = now
+    klass.updated_by = user.id
+    await record_audit(db, school_id=school_id, user_id=user.id, action="delete",
+                       table_name="school_classes", record_id=klass.id,
+                       changes={"name": {"old": klass.name, "new": None},
+                                "arms_closed": {"old": len(arms), "new": 0}})
+    await db.commit()
+    return {"closed": True, "arms_closed": len(arms)}
+
+
+class TransferIn(BaseModel):
+    student_ids: list[str]
+    to_arm_id: str
+
+
+@router.post("/students/transfer")
+async def transfer_students(payload: TransferIn, db: DbDep,
+                            user: Annotated[User, AdminOnly]):
+    """Move students between arms — needed before an arm can be closed, and for
+    ordinary reshuffles (e.g. splitting JSS1 A into A and B)."""
+    school_id = tenant_scope(user)
+    target = await db.get(ClassArm, payload.to_arm_id)
+    if not target or target.school_id != school_id or target.deleted_at:
+        raise HTTPException(status_code=404, detail="Target arm not found")
+
+    moved = 0
+    for sid in payload.student_ids:
+        st = await db.get(Student, sid)
+        if not st or st.school_id != school_id:
+            raise HTTPException(status_code=404, detail=f"Student {sid} not found")
+        if st.current_arm_id == payload.to_arm_id:
+            continue
+        old = st.current_arm_id
+        st.current_arm_id = payload.to_arm_id
+        st.updated_by = user.id
+        await record_audit(db, school_id=school_id, user_id=user.id,
+                           action="update", table_name="students", record_id=st.id,
+                           changes={"current_arm_id": {"old": old,
+                                                       "new": payload.to_arm_id}})
+        moved += 1
+    await db.commit()
+    return {"moved": moved}
