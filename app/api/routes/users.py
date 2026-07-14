@@ -182,6 +182,11 @@ class AssignmentIn(BaseModel):
     teacher_id: str
     subject_id: str
     arm_id: str
+    # A subject in a class normally has exactly one owner — that is what makes
+    # "who entered this mark?" answerable. A second assignment is therefore
+    # refused (409) unless the admin deliberately says yes, which covers real
+    # cases like co-teaching or a stand-in during leave.
+    allow_co_teacher: bool = False
 
 
 @router.post("/assignments", status_code=status.HTTP_201_CREATED)
@@ -201,15 +206,29 @@ async def assign_teacher(
     if not arm or arm.school_id != school_id:
         raise HTTPException(status_code=404, detail="Class not found")
 
-    dup = (await db.execute(select(TeachingAssignment).where(
+    # everyone who currently owns this (subject, arm) score sheet
+    holders = (await db.execute(select(TeachingAssignment).where(
         TeachingAssignment.school_id == school_id,
-        TeachingAssignment.teacher_id == payload.teacher_id,
         TeachingAssignment.subject_id == payload.subject_id,
         TeachingAssignment.arm_id == payload.arm_id,
-        TeachingAssignment.deleted_at.is_(None)))).scalars().first()
-    if dup:
-        raise HTTPException(status_code=409,
-                            detail="This teacher already has that subject in that class")
+        TeachingAssignment.deleted_at.is_(None)))).scalars().all()
+
+    if any(h.teacher_id == payload.teacher_id for h in holders):
+        raise HTTPException(
+            status_code=409,
+            detail="This teacher already has that subject in that class")
+
+    if holders and not payload.allow_co_teacher:
+        others = []
+        for h in holders:
+            u = await db.get(User, h.teacher_id)
+            if u:
+                others.append(f"{u.first_name} {u.last_name}")
+        who = " and ".join(others) or "another teacher"
+        raise HTTPException(
+            status_code=409,
+            detail=(f"{subject.name} in this class is already assigned to {who}. "
+                    "Remove that assignment first, or confirm to add a co-teacher."))
 
     ta = TeachingAssignment(school_id=school_id, teacher_id=payload.teacher_id,
                             subject_id=payload.subject_id, arm_id=payload.arm_id,
@@ -224,7 +243,8 @@ async def assign_teacher(
                        ip_address=request.client.host if request.client else None)
     await db.commit()
     return {"id": ta.id, "teacher_id": ta.teacher_id,
-            "subject_id": ta.subject_id, "arm_id": ta.arm_id}
+            "subject_id": ta.subject_id, "arm_id": ta.arm_id,
+            "co_teachers": len(holders)}
 
 
 @router.get("/assignments")

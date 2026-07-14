@@ -78,7 +78,7 @@ export default function UsersPage() {
     }));
   }
 
-  async function addAssignment() {
+  async function addAssignment(allowCoTeacher = false) {
     if (!asg.teacher_id || !asg.subject_id || !asg.arm_id) {
       setNotice({ kind: "err", text: "Pick a teacher, a subject and a class." });
       return;
@@ -86,16 +86,30 @@ export default function UsersPage() {
     setBusy("assign"); setNotice(null);
     try {
       await api("/api/users/assignments", {
-        method: "POST", body: JSON.stringify(asg),
+        method: "POST",
+        body: JSON.stringify({ ...asg, allow_co_teacher: allowCoTeacher }),
       });
-      setNotice({ kind: "ok", text: "Assigned. Only this teacher can now enter those scores." });
+      setNotice({
+        kind: "ok",
+        text: allowCoTeacher
+          ? "Added as a co-teacher. Both teachers can now enter those scores."
+          : "Assigned. Only this teacher can enter those scores.",
+      });
       setAsg({ teacher_id: "", subject_id: "", arm_id: "" });
       await load();
     } catch (e) {
-      setNotice({
-        kind: "err",
-        text: e instanceof ApiError ? e.message : "Could not assign the teacher.",
-      });
+      const msg = e instanceof ApiError ? e.message : "Could not assign the teacher.";
+      // the subject is already owned: make the admin choose deliberately
+      if (e instanceof ApiError && e.status === 409 && msg.includes("already assigned to")) {
+        if (confirm(`${msg}\n\nAdd as a co-teacher anyway? Both will be able to enter and change these marks.`)) {
+          setBusy(null);
+          await addAssignment(true);
+          return;
+        }
+        setNotice({ kind: "err", text: msg });
+      } else {
+        setNotice({ kind: "err", text: msg });
+      }
     } finally { setBusy(null); }
   }
 
@@ -290,10 +304,15 @@ export default function UsersPage() {
 
         {assignments.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
-            {assignments.map((a) => (
+            {assignments.map((a) => {
+              const shared = assignments.filter(
+                (x) => x.subject_id === a.subject_id && x.arm_id === a.arm_id).length > 1;
+              return (
               <span key={a.id}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-line bg-paper px-3 py-1 text-xs">
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs ${
+                      shared ? "border-brass bg-brass/15" : "border-line bg-paper"}`}>
                 <b>{a.teacher_name}</b> · {a.subject_name} · {a.class_label}
+                {shared && <span className="text-ink-soft">(co-taught)</span>}
                 <button
                   onClick={() => {
                     if (confirm(`Remove ${a.teacher_name} from ${a.subject_name} (${a.class_label})?`))
@@ -306,9 +325,22 @@ export default function UsersPage() {
                   ×
                 </button>
               </span>
-            ))}
+              );
+            })}
           </div>
         )}
+
+        {asg.subject_id && asg.arm_id && (() => {
+          const owners = assignments.filter(
+            (a) => a.subject_id === asg.subject_id && a.arm_id === asg.arm_id);
+          if (owners.length === 0) return null;
+          return (
+            <p className="text-xs text-sanction bg-sanction/5 border border-sanction/30 rounded px-2 py-1.5">
+              Already assigned to {owners.map((o) => o.teacher_name).join(" and ")}.
+              Assigning another teacher will ask you to confirm co-teaching.
+            </p>
+          );
+        })()}
 
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
           <select value={asg.teacher_id}
@@ -331,7 +363,7 @@ export default function UsersPage() {
             <option value="">Class…</option>
             {arms.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
           </select>
-          <button onClick={addAssignment} disabled={busy !== null}
+          <button onClick={() => addAssignment(false)} disabled={busy !== null}
                   className="rounded-md bg-ink text-white px-4 py-2 text-sm font-medium hover:bg-ink-soft disabled:opacity-50">
             {busy === "assign" ? "Assigning…" : "Assign"}
           </button>
