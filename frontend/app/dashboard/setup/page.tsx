@@ -3,7 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 
-type Term = { id: string; name: string; session: string; is_current: boolean };
+type Term = {
+  id: string; name: string; session: string; is_current: boolean;
+  start_date: string | null; end_date: string | null;
+  next_term_begins: string | null;
+};
 type Arm = { id: string; label: string; class_id: string; class_name: string };
 type Subject = { id: string; name: string; code: string | null };
 type Component = { id: string; name: string; max_score: number; sequence: number };
@@ -96,6 +100,24 @@ export default function SetupPage() {
       await load();
     } catch { setNotice({ kind: "err", text: "Could not save the name." }); }
     finally { setBusy(null); }
+  }
+
+  async function saveTermDates(termId: string, field: string, value: string) {
+    setBusy(`t-${termId}`); setNotice(null);
+    try {
+      await api(`/api/academics/terms/${termId}`, {
+        method: "PATCH", body: JSON.stringify({ [field]: value }),
+      });
+      setNotice({
+        kind: "ok",
+        text: field === "next_term_begins"
+          ? "Resumption date saved — it now prints on every report card."
+          : "Term dates saved.",
+      });
+      await load();
+    } catch (e) {
+      setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not save the date." });
+    } finally { setBusy(null); }
   }
 
   async function toggleWithhold(next: boolean) {
@@ -374,15 +396,42 @@ export default function SetupPage() {
           {terms.length === 0 ? (
             <p className="text-sm text-ink-soft">None yet.</p>
           ) : (
-            <ul className="text-sm space-y-1">
+            <ul className="text-sm space-y-3">
               {terms.map((t) => (
-                <li key={t.id}>
-                  {t.name} term · {t.session}{" "}
-                  {t.is_current && (
-                    <span className="rounded-full bg-ledger/10 text-ledger px-2 py-0.5 text-xs font-medium">
-                      current
-                    </span>
-                  )}
+                <li key={t.id} className="space-y-1.5">
+                  <div>
+                    {t.name} term · {t.session}{" "}
+                    {t.is_current && (
+                      <span className="rounded-full bg-ledger/10 text-ledger px-2 py-0.5 text-xs font-medium">
+                        current
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-end gap-3">
+                    {([
+                      { key: "start_date", label: "Term starts", value: t.start_date },
+                      { key: "end_date", label: "Term ends", value: t.end_date },
+                      { key: "next_term_begins", label: "Next term begins", value: t.next_term_begins },
+                    ]).map((f) => (
+                      <label key={f.key} className="block">
+                        <span className="block text-xs text-ink-soft mb-0.5">
+                          {f.label}
+                          {f.key === "next_term_begins" && (
+                            <span className="text-brass-ink"> (on report card)</span>
+                          )}
+                        </span>
+                        <input
+                          type="date"
+                          defaultValue={f.value ?? ""}
+                          disabled={busy !== null}
+                          onChange={(e) => {
+                            if (e.target.value) saveTermDates(t.id, f.key, e.target.value);
+                          }}
+                          className="rounded border border-line px-2 py-1 text-sm bg-white"
+                        />
+                      </label>
+                    ))}
+                  </div>
                 </li>
               ))}
             </ul>

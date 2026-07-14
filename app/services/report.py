@@ -53,6 +53,34 @@ async def build_report_data(db: AsyncSession, school_id: str,
             "position": sr.subject_position,
         })
 
+    # attendance for the term — parents look for this as closely as the marks.
+    # Bounded by the term's dates when the school has set them; otherwise every
+    # record for the student is counted.
+    from app.models.attendance import Attendance, AttendanceStatus
+    att_stmt = select(Attendance).where(Attendance.school_id == school_id,
+                                        Attendance.student_id == student_id)
+    if term and term.start_date:
+        att_stmt = att_stmt.where(Attendance.date >= term.start_date)
+    if term and term.end_date:
+        att_stmt = att_stmt.where(Attendance.date <= term.end_date)
+    att_rows = (await db.execute(att_stmt)).scalars().all()
+
+    counts = {s.value: 0 for s in AttendanceStatus}
+    for r in att_rows:
+        key = r.status.value if hasattr(r.status, "value") else str(r.status)
+        counts[key] = counts.get(key, 0) + 1
+    days = len(att_rows)
+    present_like = counts.get("present", 0) + counts.get("late", 0)
+    attendance = {
+        "days_recorded": days,
+        "present": counts.get("present", 0),
+        "absent": counts.get("absent", 0),
+        "late": counts.get("late", 0),
+        "excused": counts.get("excused", 0),
+        # the figure a parent actually reads
+        "percentage": round(present_like / days * 100, 1) if days else None,
+    }
+
     return {
         "school": {"name": school.name, "address": school.address,
                    "state": school.state, "color": school.primary_color,
@@ -71,6 +99,7 @@ async def build_report_data(db: AsyncSession, school_id: str,
                     "subjects_count": tr.subjects_count,
                     "position": tr.overall_position, "class_size": tr.class_size,
                     "class_average": tr.class_average},
+        "attendance": attendance,
         "affective": tr.affective,
         "comments": {"form_teacher": tr.form_teacher_comment,
                      "principal": tr.principal_comment},

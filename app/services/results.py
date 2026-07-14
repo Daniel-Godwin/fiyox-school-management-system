@@ -57,10 +57,14 @@ async def compute_term(db: AsyncSession, school_id: str, arm_id: str, term_id: s
     if not student_ids:
         return {"students": 0, "subjects": 0}
 
-    # all raw scores for this arm + term
+    # All raw scores for the students *currently* in this arm.
+    # Deliberately NOT filtered by ScoreEntry.arm_id: that column is a snapshot
+    # of where the student sat when the mark was entered, and goes stale the
+    # moment they change class. Filtering on it silently drops a transferred
+    # student's marks from their own result.
     entries = (await db.execute(
         select(ScoreEntry).where(ScoreEntry.school_id == school_id,
-                                 ScoreEntry.arm_id == arm_id,
+                                 ScoreEntry.student_id.in_(student_ids),
                                  ScoreEntry.term_id == term_id)
     )).scalars().all()
 

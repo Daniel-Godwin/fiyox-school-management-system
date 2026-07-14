@@ -54,13 +54,27 @@ async def get_scores(
     subject_id: str = Query(...),
     term_id: str = Query(...),
 ):
-    """Existing raw scores for one arm+subject+term — used to prefill the entry grid."""
+    """Existing raw scores for one arm+subject+term — used to prefill the entry grid.
+
+    Scores are looked up by the students *currently* in the arm, never by the
+    arm_id stamped on the score row. A student who moves class keeps their marks:
+    filtering on the stored arm_id would strand them (they would silently vanish
+    from the sheet while still sitting in the database).
+    """
     school_id = tenant_scope(user)
     # a teacher may only see the sheets they actually teach
     await assert_may_touch_scores(db, user, school_id, subject_id, arm_id)
+
+    student_ids = [s.id for s in (await db.execute(select(Student).where(
+        Student.school_id == school_id,
+        Student.current_arm_id == arm_id,
+        Student.deleted_at.is_(None)))).scalars().all()]
+    if not student_ids:
+        return []
+
     rows = (await db.execute(select(ScoreEntry).where(
         ScoreEntry.school_id == school_id,
-        ScoreEntry.arm_id == arm_id,
+        ScoreEntry.student_id.in_(student_ids),
         ScoreEntry.subject_id == subject_id,
         ScoreEntry.term_id == term_id))).scalars().all()
     return [{"student_id": r.student_id, "component_id": r.component_id,
@@ -88,6 +102,10 @@ async def enter_scores(
                 ScoreEntry.term_id == payload.term_id,
                 ScoreEntry.component_id == component_id))).scalars().first()
             if existing:
+                # the student may have changed arm since this row was written;
+                # keep the stamp current so reports and exports stay coherent
+                if existing.arm_id != payload.arm_id:
+                    existing.arm_id = payload.arm_id
                 if existing.score != score:
                     # capture old -> new for the audit trail
                     await record_audit(

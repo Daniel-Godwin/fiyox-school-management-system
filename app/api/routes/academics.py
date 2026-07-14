@@ -21,6 +21,10 @@ async def list_terms(db: DbDep, user: CurrentUser):
         "name": str(t.name).split(".")[-1].lower(),
         "session": sessions.get(t.session_id, ""),
         "is_current": t.is_current,
+        "start_date": str(t.start_date) if t.start_date else None,
+        "end_date": str(t.end_date) if t.end_date else None,
+        "next_term_begins": (str(t.next_term_begins)
+                             if t.next_term_begins else None),
     } for t in terms]
 
 
@@ -211,6 +215,51 @@ from app.services.audit import record_audit
 
 class ArmRename(BaseModel):
     name: str
+
+
+class TermDatesIn(BaseModel):
+    start_date: str | None = None
+    end_date: str | None = None
+    next_term_begins: str | None = None   # printed on every report card
+
+
+@router.patch("/terms/{term_id}")
+async def set_term_dates(term_id: str, payload: TermDatesIn, db: DbDep,
+                         user: Annotated[User, AdminOnly]):
+    """Set the term's dates. `next_term_begins` appears on the report card —
+    it is the line every parent looks for."""
+    from datetime import date as _date
+    school_id = tenant_scope(user)
+    term = await db.get(Term, term_id)
+    if not term or term.school_id != school_id:
+        raise HTTPException(status_code=404, detail="Term not found")
+
+    changes = {}
+    for field in ("start_date", "end_date", "next_term_begins"):
+        raw = getattr(payload, field)
+        if raw is None:
+            continue
+        try:
+            value = _date.fromisoformat(raw)
+        except ValueError:
+            raise HTTPException(status_code=400,
+                                detail=f"{field} must be a date like 2026-09-14")
+        old = getattr(term, field)
+        if old != value:
+            changes[field] = {"old": str(old) if old else None, "new": str(value)}
+            setattr(term, field, value)
+
+    if changes:
+        term.updated_by = user.id
+        await record_audit(db, school_id=school_id, user_id=user.id,
+                           action="update", table_name="terms",
+                           record_id=term.id, changes=changes)
+        await db.commit()
+    return {"id": term.id,
+            "start_date": str(term.start_date) if term.start_date else None,
+            "end_date": str(term.end_date) if term.end_date else None,
+            "next_term_begins": (str(term.next_term_begins)
+                                 if term.next_term_begins else None)}
 
 
 @router.patch("/arms/{arm_id}")
