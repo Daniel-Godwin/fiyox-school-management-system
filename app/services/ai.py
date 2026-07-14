@@ -116,12 +116,33 @@ def assess_risk(*, average: float, class_average: float, failing_subjects: int,
                 subjects_count: int, attendance_pct: float | None,
                 previous_average: float | None,
                 owes_fees: bool) -> dict:
-    """A transparent risk assessment. Every flag explains itself."""
+    """Which students actually need a teacher's attention?
+
+    Calibration matters more than cleverness here. A register that flags
+    everybody is worthless — the head teacher stops reading it, and the child
+    who really is drowning gets lost in the noise. So:
+
+    * **The trigger must be academic or attendance.** Unpaid fees alone are NOT
+      a reason to flag a child. Early in every term nobody has paid; a top
+      student whose father is a week late with the cheque is not "at risk", and
+      saying so insults the family and wastes the teacher's time. Fees are
+      *context* — they are added to an existing flag (they help explain why a
+      child is struggling, and they matter for dropout), but they never raise
+      one on their own. The bursar chases debt; this register is for teachers.
+
+    * **A student performing well is not flagged, full stop.** Whatever else is
+      true, if a child is passing comfortably and attending, they do not belong
+      on a list of children who need intervention.
+
+    * **The bar is a real concern, not a technicality.** "Watch" now means
+      something a form teacher would actually act on.
+    """
     reasons: list[str] = []
     score = 0
 
+    # ---- academic signals -------------------------------------------------
     if average < 40:
-        score += 3
+        score += 4
         reasons.append(f"Average of {average}% is below the pass mark")
     elif average < 50:
         score += 2
@@ -130,45 +151,61 @@ def assess_risk(*, average: float, class_average: float, failing_subjects: int,
     if subjects_count and failing_subjects >= max(2, subjects_count // 3):
         score += 2
         reasons.append(f"Failing {failing_subjects} of {subjects_count} subjects")
-
-    if class_average and average < class_average - 15:
+    elif failing_subjects == 1 and subjects_count:
+        # one weak subject is worth a mention, not an alarm
         score += 1
-        reasons.append(f"{round(class_average - average, 1)} points below the class average")
+        reasons.append("Failing one subject")
+
+    if class_average and average < class_average - 20:
+        score += 1
+        reasons.append(
+            f"{round(class_average - average, 1)} points below the class average")
 
     if previous_average is not None:
         drop = round(previous_average - average, 1)
-        if drop >= 10:
+        if drop >= 15:
+            score += 3
+            reasons.append(f"Average has fallen sharply — down {drop} points since last term")
+        elif drop >= 8:
             score += 2
             reasons.append(f"Average has fallen {drop} points since last term")
 
-    if attendance_pct is not None and attendance_pct < 75:
-        score += 2
-        reasons.append(f"Attendance is only {attendance_pct}%")
-    elif attendance_pct is not None and attendance_pct < 85:
-        score += 1
-        reasons.append(f"Attendance of {attendance_pct}% is a concern")
+    # ---- attendance -------------------------------------------------------
+    if attendance_pct is not None:
+        if attendance_pct < 60:
+            score += 4
+            reasons.append(f"Attendance is only {attendance_pct}% — the child is barely in school")
+        elif attendance_pct < 75:
+            score += 3
+            reasons.append(f"Attendance is poor at {attendance_pct}%")
+        elif attendance_pct < 85:
+            score += 1
+            reasons.append(f"Attendance of {attendance_pct}% needs watching")
 
+    # A child who is doing fine academically and turning up is not "at risk",
+    # whatever the ledger says. Leave them alone.
+    if not reasons:
+        return {"level": "none", "score": 0, "reasons": [],
+                "recommended_action": "", "fees_note": None}
+
+    # ---- fees: context for an existing concern, never a trigger -----------
+    fees_note = None
     if owes_fees:
-        # not academic, but it predicts dropout in Nigerian schools and belongs
-        # in front of a head teacher rather than buried in the bursar's ledger
-        score += 1
-        reasons.append("Fees are outstanding")
+        fees_note = ("Fees are also outstanding — this may be part of the picture, "
+                     "and should be raised gently with the parents.")
 
-    if score >= 5:
+    if score >= 6:
         level = "high"
     elif score >= 3:
         level = "moderate"
-    elif score >= 1:
-        level = "watch"
     else:
-        level = "none"
+        level = "watch"
 
     actions = {
         "high": "Invite the parents this week; agree a written recovery plan.",
         "moderate": "Speak to the student and inform the parents at the next PTA.",
         "watch": "Keep an eye on this student; check in with subject teachers.",
-        "none": "",
     }
 
     return {"level": level, "score": score, "reasons": reasons,
-            "recommended_action": actions[level]}
+            "recommended_action": actions[level], "fees_note": fees_note}

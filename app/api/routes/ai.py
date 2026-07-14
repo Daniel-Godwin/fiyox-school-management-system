@@ -197,7 +197,7 @@ async def at_risk_register(
             attendance_pct=att_pct, previous_average=prev_avg, owes_fees=owes)
 
         if risk["level"] == "none":
-            continue
+            continue    # doing fine: not on a list of children needing help
 
         arm = arms.get(tr.arm_id)
         register.append({

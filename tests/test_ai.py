@@ -65,6 +65,31 @@ async def test_regenerating_never_destroys_a_teachers_own_words(ctx):
 
 # ---------------------------------------------------------------- at-risk
 
+def test_unpaid_fees_alone_never_flag_a_child():
+    """The bug: every student was flagged, including the top of the class,
+    because nobody had paid fees yet. Debt is the bursar's business; this
+    register is for teachers."""
+    top = assess_risk(average=88, class_average=58, failing_subjects=0,
+                      subjects_count=4, attendance_pct=97,
+                      previous_average=85, owes_fees=True)
+    assert top["level"] == "none"
+    assert top["reasons"] == []
+
+    ordinary = assess_risk(average=58, class_average=58, failing_subjects=0,
+                           subjects_count=4, attendance_pct=88,
+                           previous_average=57, owes_fees=True)
+    assert ordinary["level"] == "none"
+
+    # fees appear as CONTEXT on a child who is already struggling
+    struggling = assess_risk(average=35, class_average=58, failing_subjects=3,
+                             subjects_count=4, attendance_pct=70,
+                             previous_average=40, owes_fees=True)
+    assert struggling["level"] == "high"
+    assert struggling["fees_note"] and "outstanding" in struggling["fees_note"]
+    # but the fee note is not one of the REASONS the child was flagged
+    assert not any("fee" in r.lower() for r in struggling["reasons"])
+
+
 def test_risk_rules_are_transparent_and_proportionate():
     safe = assess_risk(average=78, class_average=60, failing_subjects=0,
                        subjects_count=4, attendance_pct=96,
@@ -78,16 +103,36 @@ def test_risk_rules_are_transparent_and_proportionate():
     joined = " ".join(failing["reasons"]).lower()
     assert "below the pass mark" in joined
     assert "failing 3 of 4" in joined
-    assert "attendance is only 61" in joined
-    assert "fees are outstanding" in joined
+    assert "attendance is poor at 61" in joined
     assert "parents" in failing["recommended_action"].lower()
 
     # a sharp fall matters even from a decent mark
     falling = assess_risk(average=54, class_average=55, failing_subjects=0,
                           subjects_count=4, attendance_pct=92,
                           previous_average=71, owes_fees=False)
-    assert falling["level"] in ("watch", "moderate")
+    assert falling["level"] in ("moderate", "high")
     assert any("fallen" in r for r in falling["reasons"])
+
+    # poor attendance alone is enough, even with decent marks
+    absent = assess_risk(average=61, class_average=58, failing_subjects=0,
+                         subjects_count=4, attendance_pct=68,
+                         previous_average=62, owes_fees=False)
+    assert absent["level"] == "moderate"
+    assert any("attendance" in r.lower() for r in absent["reasons"])
+
+
+def test_most_of_a_healthy_class_is_not_flagged():
+    """Sanity check on calibration: a register that flags everybody is noise."""
+    roll = [(88, 0, 97, 85), (76, 0, 94, 74), (64, 0, 91, 66),
+            (58, 0, 88, 57), (55, 0, 92, 56), (31, 3, 64, 44)]
+    flagged = 0
+    for avg, fails, att, prev in roll:
+        r = assess_risk(average=avg, class_average=58, failing_subjects=fails,
+                        subjects_count=4, attendance_pct=att,
+                        previous_average=prev, owes_fees=True)  # all owe fees
+        if r["level"] != "none":
+            flagged += 1
+    assert flagged == 1, f"{flagged} of 6 flagged — the register is crying wolf"
 
 
 async def test_at_risk_register_flags_the_struggling_student(ctx):

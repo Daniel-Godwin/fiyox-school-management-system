@@ -16,6 +16,7 @@ type Risk = {
   attendance_pct: number | null; owes_fees: boolean;
   level: "high" | "moderate" | "watch"; score: number;
   reasons: string[]; recommended_action: string;
+  fees_note: string | null;
 };
 type AiStatus = { llm_configured: boolean; message: string };
 
@@ -169,15 +170,22 @@ export default function EndOfTermPage() {
         <div>
           <h2 className="text-lg font-semibold">Students needing attention</h2>
           <p className="text-xs text-ink-soft">
-            Flagged from marks, attendance and fees. Every flag lists its reasons —
-            no black box.
+            Flagged on <b>marks and attendance</b> — the things a teacher can act on.
+            Unpaid fees never flag a child on their own (that is the bursar&apos;s
+            list, not this one), but they are noted where a student is already
+            struggling. Every flag lists its reasons.
           </p>
         </div>
 
         {risks === null && <p className="text-sm text-ink-soft">Checking…</p>}
         {risks?.length === 0 && (
           <p className="text-sm text-ledger">
-            No students flagged this term.
+            No students flagged this term — the class is healthy.
+          </p>
+        )}
+        {risks && risks.length > 0 && (
+          <p className="text-xs text-ink-soft">
+            {risks.length} student{risks.length === 1 ? "" : "s"} flagged.
           </p>
         )}
         {risks && risks.length > 0 && (
@@ -199,6 +207,9 @@ export default function EndOfTermPage() {
                 <ul className="mt-1.5 text-sm list-disc list-inside space-y-0.5">
                   {r.reasons.map((reason, i) => <li key={i}>{reason}</li>)}
                 </ul>
+                {r.fees_note && (
+                  <p className="mt-1.5 text-xs opacity-80 italic">{r.fees_note}</p>
+                )}
                 {r.recommended_action && (
                   <p className="mt-1.5 text-xs font-medium">
                     → {r.recommended_action}
