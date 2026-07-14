@@ -29,23 +29,63 @@ def _big_jpeg_bytes() -> bytes:
     return b.getvalue()
 
 
-def test_comments_are_banded_and_class_relative():
-    top, _ = generate_comments(first_name="Ada", average=88, position=1,
-                               class_size=30, class_average=55)
-    assert "best result in the class" in top.lower()
+def test_every_student_in_a_class_gets_a_different_comment():
+    """The whole point: a top student and a failing student must not receive
+    the same words. (Bug report: 'comments go the same to all students'.)"""
+    class_avg = 55.0
+    roll = [("Fatima", 88, 1), ("Chinedu", 74, 2), ("Ngozi", 64, 3),
+            ("Ibrahim", 57, 5), ("Tunde", 50, 8), ("Musa", 46, 10),
+            ("Sani", 24, 12)]
+    teacher, principal = [], []
+    for name, avg, pos in roll:
+        t, p = generate_comments(first_name=name, average=float(avg),
+                                 position=pos, class_size=12,
+                                 class_average=class_avg)
+        teacher.append(t)
+        principal.append(p)
 
-    weak, weak_p = generate_comments(first_name="Sani", average=35, position=29,
-                                     class_size=30, class_average=55)
-    assert "well below the class average" in weak.lower()
-    assert any(w in weak_p.lower() for w in ("urgent", "poor"))
+    # the top and the bottom of the class must read completely differently
+    assert teacher[0] != teacher[-1]
+    assert principal[0] != principal[-1]
+    assert "outstanding" in teacher[0].lower()
+    assert any(w in teacher[-1].lower() for w in ("poor", "intervention", "behind"))
+    assert any(w in principal[-1].lower() for w in ("unacceptable", "not acceptable",
+                                                    "very poor"))
+    # a healthy spread, not one comment repeated
+    assert len(set(teacher)) >= 5, "teacher comments are not varying by performance"
+    assert len(set(principal)) >= 3, "principal comments are not varying by performance"
 
-    # same average means different things in different classes
-    strong_class, _ = generate_comments(first_name="Bola", average=62, position=20,
-                                        class_size=30, class_average=75)
-    weak_class, _ = generate_comments(first_name="Bola", average=62, position=2,
-                                      class_size=30, class_average=45)
-    assert "below the class average" in strong_class.lower()
-    assert "best" in weak_class.lower() or "above" in weak_class.lower()
+
+def test_comment_is_internally_consistent():
+    """A comment must never praise and scold in the same breath — the old
+    version could say 'A fair performance ... Among the very best in the class'."""
+    t, _ = generate_comments(first_name="Ngozi", average=64, position=3,
+                             class_size=12, class_average=55)
+    positive = any(w in t.lower() for w in ("strong", "very good", "well",
+                                            "confidently", "understands"))
+    negative = any(w in t.lower() for w in ("weak term", "disappointing",
+                                            "struggling", "very poor"))
+    assert positive and not negative
+
+
+def test_standing_reflects_the_class_not_just_the_mark():
+    # the same 62% means different things in different classes
+    in_strong_class, _ = generate_comments(first_name="Bola", average=62,
+                                           position=18, class_size=20,
+                                           class_average=78)
+    in_weak_class, _ = generate_comments(first_name="Bola", average=62,
+                                         position=1, class_size=20,
+                                         class_average=41)
+    assert "below the class average" in in_strong_class.lower()
+    assert "best result in the class" in in_weak_class.lower()
+
+
+def test_a_failing_mark_is_never_praised_even_at_the_top_of_a_weak_class():
+    """Being first in a class that is failing is not a pass."""
+    t, p = generate_comments(first_name="Zainab", average=34, position=1,
+                             class_size=20, class_average=28)
+    assert "outstanding" not in t.lower()
+    assert not any(w in p.lower() for w in ("excellent", "splendid"))
 
 
 async def test_compute_generates_comments_and_class_average(ctx):
