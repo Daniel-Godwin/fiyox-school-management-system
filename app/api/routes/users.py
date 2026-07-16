@@ -166,6 +166,81 @@ async def link_ward(
     return {"linked": True}
 
 
+@router.get("/{user_id}/wards")
+async def list_wards(
+    user_id: str, db: DbDep,
+    admin: Annotated[User, AdminOnly],
+):
+    """Which children is this parent linked to?
+
+    This is what makes it possible to reconcile an already-existing parent
+    account with a sibling admitted later: the admin opens the parent, sees who
+    is currently linked, and adds the new ward — no duplicate account.
+    """
+    from app.models.academics import ClassArm, SchoolClass
+
+    school_id = tenant_scope(admin)
+    parent = await db.get(User, user_id)
+    if not parent or parent.school_id != school_id or parent.role != Role.PARENT:
+        raise HTTPException(status_code=404, detail="Parent user not found")
+
+    links = (await db.execute(select(Guardian).where(
+        Guardian.school_id == school_id,
+        Guardian.parent_user_id == user_id))).scalars().all()
+
+    arms = {a.id: a for a in (await db.execute(select(ClassArm).where(
+        ClassArm.school_id == school_id))).scalars().all()}
+    classes = {c.id: c.name for c in (await db.execute(select(SchoolClass).where(
+        SchoolClass.school_id == school_id))).scalars().all()}
+
+    out = []
+    for link in links:
+        st = await db.get(Student, link.student_id)
+        if not st or st.deleted_at:
+            continue
+        arm = arms.get(st.current_arm_id) if st.current_arm_id else None
+        out.append({
+            "student_id": st.id,
+            "name": f"{st.first_name} {st.last_name}",
+            "admission_number": st.admission_number,
+            "class_label": (f"{classes.get(arm.class_id, '')} {arm.name}".strip()
+                            if arm else "—"),
+            "relationship": link.relationship,
+        })
+    return sorted(out, key=lambda w: w["admission_number"])
+
+
+@router.delete("/{user_id}/wards/{student_id}")
+async def unlink_ward(
+    user_id: str, student_id: str, request: Request, db: DbDep,
+    admin: Annotated[User, AdminOnly],
+):
+    """Remove a ward link — a child was linked to the wrong parent, or has left.
+
+    This detaches the parent's view of that child; it never deletes the student
+    or any of their records.
+    """
+    school_id = tenant_scope(admin)
+    link = (await db.execute(select(Guardian).where(
+        Guardian.school_id == school_id,
+        Guardian.parent_user_id == user_id,
+        Guardian.student_id == student_id))).scalars().first()
+    if not link:
+        raise HTTPException(status_code=404,
+                            detail="This ward is not linked to that parent")
+
+    await db.delete(link)
+    await record_audit(db, school_id=school_id, user_id=admin.id, action="delete",
+                       table_name="guardians", record_id=link.id,
+                       changes={"parent": {"old": user_id, "new": None},
+                                "student": {"old": student_id, "new": None}},
+                       ip_address=request.client.host if request.client else None)
+    await db.commit()
+    return {"unlinked": True,
+            "note": "This parent can no longer see that child's results, "
+                    "fees or timetable."}
+
+
 # ---------- Teaching assignments: who teaches what, to whom ----------
 """The school admin decides which teacher owns which (subject, arm) score sheet.
 

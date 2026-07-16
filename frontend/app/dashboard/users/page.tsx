@@ -15,6 +15,10 @@ type Assignment = {
   id: string; teacher_id: string; teacher_name: string;
   subject_id: string; subject_name: string; arm_id: string; class_label: string;
 };
+type Ward = {
+  student_id: string; name: string; admission_number: string;
+  class_label: string; relationship: string | null;
+};
 
 const ROLES: { value: Role; label: string }[] = [
   { value: "teacher", label: "Teacher" },
@@ -40,6 +44,9 @@ export default function UsersPage() {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [asg, setAsg] = useState({ teacher_id: "", subject_id: "", arm_id: "" });
   const [reveal, setReveal] = useState<{ email: string; temp: string } | null>(null);
+  const [wardsFor, setWardsFor] = useState<UserRow | null>(null);
+  const [wardList, setWardList] = useState<Ward[] | null>(null);
+  const [addWardId, setAddWardId] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
@@ -121,6 +128,50 @@ export default function UsersPage() {
       await load();
     } catch { setNotice({ kind: "err", text: "Could not remove the assignment." }); }
     finally { setBusy(null); }
+  }
+
+  async function openWards(u: UserRow) {
+    setWardsFor(u);
+    setWardList(null);
+    setAddWardId("");
+    setNotice(null);
+    try {
+      setWardList(await api<Ward[]>(`/api/users/${u.id}/wards`));
+    } catch {
+      setNotice({ kind: "err", text: "Could not load this parent's children." });
+    }
+  }
+
+  async function linkWard() {
+    if (!wardsFor || !addWardId) return;
+    setBusy("link"); setNotice(null);
+    try {
+      await api(`/api/users/${wardsFor.id}/wards`, {
+        method: "POST",
+        body: JSON.stringify({ student_id: addWardId }),
+      });
+      const child = students.find((s) => s.id === addWardId);
+      setNotice({
+        kind: "ok",
+        text: `${child ? `${child.first_name} ${child.last_name}` : "The child"} is now linked to ${wardsFor.first_name} ${wardsFor.last_name}. They will see this child on their next sign-in.`,
+      });
+      setAddWardId("");
+      setWardList(await api<Ward[]>(`/api/users/${wardsFor.id}/wards`));
+    } catch (e) {
+      setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not link the child." });
+    } finally { setBusy(null); }
+  }
+
+  async function unlinkWard(w: Ward) {
+    if (!wardsFor) return;
+    if (!confirm(`Unlink ${w.name} from ${wardsFor.first_name} ${wardsFor.last_name}? They will no longer see this child's results, fees or timetable. The student's records are not deleted.`)) return;
+    setBusy(`u-${w.student_id}`); setNotice(null);
+    try {
+      await api(`/api/users/${wardsFor.id}/wards/${w.student_id}`, { method: "DELETE" });
+      setWardList(await api<Ward[]>(`/api/users/${wardsFor.id}/wards`));
+    } catch (e) {
+      setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not unlink the child." });
+    } finally { setBusy(null); }
   }
 
   async function createUser() {
@@ -375,6 +426,72 @@ export default function UsersPage() {
         )}
       </section>
 
+      {/* ward management: reconcile an existing parent with their children */}
+      {wardsFor && (
+        <section className="rounded-lg border border-brass bg-brass/10 p-4 space-y-3 max-w-3xl">
+          <div className="flex items-baseline justify-between gap-2">
+            <p className="text-sm font-medium">
+              Children linked to {wardsFor.first_name} {wardsFor.last_name}
+              <span className="ml-2 font-normal text-xs text-ink-soft">{wardsFor.email}</span>
+            </p>
+            <button onClick={() => { setWardsFor(null); setWardList(null); }}
+                    className="text-xs text-ink-soft underline underline-offset-2">
+              Close
+            </button>
+          </div>
+
+          {wardList === null && <p className="text-sm text-ink-soft">Loading…</p>}
+
+          {wardList && wardList.length === 0 && (
+            <p className="text-sm text-sanction">
+              No children linked yet — this parent currently sees nothing.
+            </p>
+          )}
+
+          {wardList && wardList.length > 0 && (
+            <ul className="space-y-1">
+              {wardList.map((w) => (
+                <li key={w.student_id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded border border-line bg-white px-3 py-1.5 text-sm">
+                  <span>
+                    <span className="tabular text-ink-soft mr-2">{w.admission_number}</span>
+                    {w.name}
+                    <span className="ml-2 text-xs text-ink-soft">{w.class_label}</span>
+                  </span>
+                  <button onClick={() => unlinkWard(w)} disabled={busy !== null}
+                          className="text-xs text-ink-soft underline underline-offset-2 hover:text-sanction disabled:opacity-40">
+                    {busy === `u-${w.student_id}` ? "Removing…" : "Unlink"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <div className="flex flex-wrap items-end gap-2 pt-1">
+            <label className="block">
+              <span className="block text-xs text-ink-soft mb-1">
+                Link another child (e.g. a sibling admitted later)
+              </span>
+              <select value={addWardId} onChange={(e) => setAddWardId(e.target.value)}
+                      className="rounded border border-line px-2 py-1.5 text-sm bg-white min-w-64">
+                <option value="">Select student…</option>
+                {students
+                  .filter((s) => !(wardList ?? []).some((w) => w.student_id === s.id))
+                  .map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.admission_number} — {s.first_name} {s.last_name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <button onClick={linkWard} disabled={busy !== null || !addWardId}
+                    className="rounded-md bg-ink text-white px-4 py-2 text-sm font-medium hover:bg-ink-soft disabled:opacity-50">
+              {busy === "link" ? "Linking…" : "Link child"}
+            </button>
+          </div>
+        </section>
+      )}
+
       {/* list */}
       <div className="flex flex-wrap gap-1.5">
         <button onClick={() => setFilter("")}
@@ -413,6 +530,12 @@ export default function UsersPage() {
                   </span>
                 </td>
                 <td className="px-3 py-2 text-right whitespace-nowrap">
+                  {u.role === "parent" && (
+                    <button onClick={() => openWards(u)} disabled={busy !== null}
+                            className="text-ink underline underline-offset-2 hover:text-ink-soft disabled:opacity-50 mr-3">
+                      Children
+                    </button>
+                  )}
                   <button onClick={() => resetPassword(u)} disabled={busy !== null}
                           className="text-ink underline underline-offset-2 hover:text-ink-soft disabled:opacity-50 mr-3">
                     {busy === `r-${u.id}` ? "Resetting…" : "Reset password"}
