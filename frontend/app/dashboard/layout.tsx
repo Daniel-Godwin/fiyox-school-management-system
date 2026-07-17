@@ -9,6 +9,8 @@ import { ToastProvider } from "@/components/Toast";
 const NAV: { href: string; label: string; roles: User["role"][] }[] = [
   { href: "/dashboard", label: "Overview",
     roles: ["super_admin", "school_admin", "bursar", "teacher", "student", "parent"] },
+  { href: "/dashboard/schools", label: "Schools",
+    roles: ["super_admin"] },
   { href: "/dashboard/students", label: "Students",
     roles: ["super_admin", "school_admin", "teacher", "bursar"] },
   { href: "/dashboard/setup", label: "School setup",

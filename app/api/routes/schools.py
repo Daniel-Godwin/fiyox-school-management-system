@@ -162,3 +162,32 @@ async def delete_branding(
     setattr(school, field, None)
     await db.commit()
     return {"asset": asset, "removed": True}
+
+
+@router.get("", tags=["schools"])
+async def list_schools(
+    db: DbDep,
+    _: Annotated[User, Depends(require_roles(Role.SUPER_ADMIN))],
+):
+    """The platform owner's view: every school, with enough numbers to see at a
+    glance which pilots are alive and which never started."""
+    from app.models.student import Student
+
+    schools = (await db.execute(select(School).where(
+        School.deleted_at.is_(None)).order_by(School.created_at))).scalars().all()
+
+    out = []
+    for s in schools:
+        students = (await db.execute(select(Student.id).where(
+            Student.school_id == s.id,
+            Student.deleted_at.is_(None)))).scalars().all()
+        users = (await db.execute(select(User.id).where(
+            User.school_id == s.id,
+            User.deleted_at.is_(None)))).scalars().all()
+        out.append({
+            "id": s.id, "name": s.name, "slug": s.slug,
+            "state": s.state, "phone": s.phone,
+            "students": len(students), "users": len(users),
+            "created_at": str(s.created_at)[:10] if s.created_at else None,
+        })
+    return out
