@@ -221,8 +221,8 @@ export default function StudentsPage() {
           </div>
         )}
 
-        <div className="mt-6 bg-card border border-line rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="mt-6 bg-card border border-line rounded-xl overflow-hidden overflow-x-auto">
+          <table className="w-full min-w-[560px] text-sm">
             <thead>
               <tr className="bg-ink text-white text-left">
                 <th className="px-3 py-2.5 font-medium w-8"><span className="sr-only">Select</span></th>

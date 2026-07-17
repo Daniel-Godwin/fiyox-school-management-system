@@ -1,10 +1,18 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Fiyox — School Management",
   description:
     "Multi-tenant school management for Nigerian secondary schools: results, fees, attendance, and parent communication.",
+};
+
+// Without this, every phone renders the desktop layout shrunk to unreadable.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  // allow pinch-zoom (accessibility) but start at natural size
+  maximumScale: 5,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

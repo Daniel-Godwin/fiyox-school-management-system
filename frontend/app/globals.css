@@ -21,10 +21,39 @@ body {
   font-family: var(--font-body);
 }
 
+/* ---- typography scale: readable on a phone held at arm's length ---- */
+html {
+  font-size: 17px;                 /* raises every rem-based Tailwind size */
+  -webkit-text-size-adjust: 100%;  /* stop iOS inflating text unpredictably */
+}
+@media (min-width: 768px) {
+  html { font-size: 16.5px; }
+}
+
 h1, h2, h3, .display {
   font-family: var(--font-display);
   letter-spacing: -0.02em;
   font-weight: 700;
+}
+
+/* ---- touch ergonomics ---- */
+/* fingers need bigger targets than mouse pointers; 44px is the Apple/Android
+   guideline for anything tappable */
+@media (pointer: coarse) {
+  button, a[role="button"], select, input[type="checkbox"] + *, .tap-target {
+    min-height: 44px;
+  }
+  button { padding-top: 0.55rem; padding-bottom: 0.55rem; }
+  input, select, textarea {
+    min-height: 44px;
+    font-size: 16px;   /* below 16px, iOS Safari force-zooms on focus */
+  }
+}
+
+/* tables scroll sideways on small screens instead of crushing columns */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* ---- interaction polish: applied app-wide ---- */
