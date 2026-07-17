@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
+import { useToast } from "@/components/Toast";
 
 type Term = {
   id: string; name: string; session: string; is_current: boolean;
@@ -31,6 +32,8 @@ export default function SetupPage() {
   } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [testPhone, setTestPhone] = useState("");
+  const toast = useToast();
 
   // quick setup form
   const [qs, setQs] = useState({
@@ -73,6 +76,25 @@ export default function SetupPage() {
 
   const configured = terms.length > 0;
   const split = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
+
+  async function sendTestSms() {
+    setBusy("sms");
+    try {
+      const r = await api<{ ok: boolean; status: string; provider: string; error: string | null; note: string; sent_to: string }>(
+        "/api/notifications/test-sms", {
+          method: "POST", body: JSON.stringify({ phone: testPhone.trim() }),
+        });
+      if (r.provider === "mock") {
+        toast.info("SMS is in preview mode — nothing was delivered. Set TERMII_API_KEY to go live.");
+      } else if (r.ok) {
+        toast.ok(`Message sent to ${r.sent_to}. If it doesn't arrive shortly, your sender ID may still be pending approval.`);
+      } else {
+        toast.err(`Termii rejected the message: ${r.error ?? "unknown error"}`);
+      }
+    } catch (e) {
+      toast.err(e instanceof ApiError ? e.message : "Could not send the test SMS.");
+    } finally { setBusy(null); }
+  }
 
   async function uploadAsset(asset: "logo" | "signature" | "stamp", file: File) {
     setBusy(asset); setNotice(null);
@@ -330,6 +352,24 @@ export default function SetupPage() {
                 <p className="text-xs text-ink-soft mt-1">{i.message}</p>
               </div>
             ))}
+          </div>
+
+          {/* verify SMS actually works, before term-time */}
+          <div className="mt-3 rounded-md border border-line bg-paper p-3">
+            <p className="text-xs font-medium mb-1.5">Test SMS delivery</p>
+            <p className="text-xs text-ink-soft mb-2">
+              Send one real message to your own phone to confirm SMS is working.
+              Nigerian format (0803…) is fine — it&apos;s converted automatically.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <input value={testPhone} onChange={(e) => setTestPhone(e.target.value)}
+                     placeholder="08031234567" inputMode="tel"
+                     className="rounded border border-line px-2 py-1.5 text-sm w-44" />
+              <button onClick={sendTestSms} disabled={busy !== null || !testPhone.trim()}
+                      className="rounded-md border border-ink text-ink px-3 py-1.5 text-sm font-medium hover:bg-ink hover:text-white disabled:opacity-40">
+                {busy === "sms" ? "Sending…" : "Send test"}
+              </button>
+            </div>
           </div>
         </section>
       )}

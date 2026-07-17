@@ -20,6 +20,28 @@ from app.models.notifications import (
 TERMII_SMS_URL = "https://api.termii.com/api/sms/send"
 
 
+def normalize_msisdn(raw: str) -> str:
+    """Put a Nigerian number into the international format Termii expects.
+
+    Schools enter numbers however they like — 08031234567, 0803 123 4567,
+    +234 803… — but Termii only accepts 2348031234567. Left unnormalized, every
+    message would silently fail. Rules:
+      08031234567   -> 2348031234567   (drop the leading 0, prepend 234)
+      8031234567    -> 2348031234567   (bare 10-digit)
+      +2348031234567 / 2348031234567 -> 2348031234567 (already international)
+    Non-Nigerian or unrecognizable numbers are returned digits-only, untouched
+    otherwise, so international parents still work.
+    """
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    if digits.startswith("234"):
+        return digits
+    if digits.startswith("0") and len(digits) == 11:
+        return "234" + digits[1:]
+    if len(digits) == 10:            # bare line without the leading 0
+        return "234" + digits
+    return digits
+
+
 class MockProvider:
     name = "mock"
 
@@ -36,7 +58,7 @@ class TermiiProvider:
 
     async def send_sms(self, to: str, body: str) -> tuple[MessageStatus, str | None, str | None]:
         payload = {
-            "to": to, "from": self.sender_id, "sms": body,
+            "to": normalize_msisdn(to), "from": self.sender_id, "sms": body,
             "type": "plain", "channel": "generic", "api_key": self.api_key,
         }
         try:

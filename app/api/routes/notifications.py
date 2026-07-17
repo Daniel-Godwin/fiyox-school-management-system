@@ -9,6 +9,7 @@
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
+from pydantic import BaseModel
 from app.core.config import settings
 from app.core.deps import DbDep, require_roles, tenant_scope
 from app.models.school import School, User, Role
@@ -19,6 +20,7 @@ from app.schemas import FeeReminderIn, MessageLogOut
 from app.services.fees import paid_total
 from app.services.notify import (
     send_sms_and_log, recipients_for_target, guardians_of, student_name,
+    get_provider, normalize_msisdn,
 )
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
@@ -136,4 +138,45 @@ async def notification_status(
                         "Online payments are off — parents are asked to pay at the "
                         "bursary. Set PAYSTACK_SECRET_KEY to enable."),
         },
+    }
+
+
+class TestSmsIn(BaseModel):
+    phone: str
+
+
+@router.post("/test-sms")
+async def send_test_sms(
+    payload: TestSmsIn, db: DbDep,
+    admin: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN))],
+):
+    """Send a single real SMS so an admin can confirm Termii is working.
+
+    This is the difference between 'I pasted the key' and 'I watched a message
+    arrive on my phone'. It reports back exactly what the provider said, so a
+    failure (bad key, unregistered sender ID, no credit) is diagnosable instead
+    of silent.
+    """
+    school_id = tenant_scope(admin)
+    provider = get_provider()
+
+    log = await send_sms_and_log(
+        db, school_id=school_id, to=payload.phone,
+        body="Fiyox test message: your school's SMS is set up correctly.",
+        purpose=MessagePurpose.ANNOUNCEMENT, created_by=admin.id)
+    await db.commit()
+
+    delivered = log.status.value if hasattr(log.status, "value") else str(log.status)
+    return {
+        "provider": provider.name,
+        "sent_to": normalize_msisdn(payload.phone),
+        "status": delivered,
+        "ok": delivered in ("sent", "mock"),
+        "error": log.error,
+        "note": ("Live SMS is not configured — this was logged only, not "
+                 "delivered. Set TERMII_API_KEY to send real messages."
+                 if provider.name == "mock" else
+                 "If this reached the phone, SMS is live. If not, check the "
+                 "error above — usually the sender ID isn't approved yet, or "
+                 "the account is out of credit."),
     }

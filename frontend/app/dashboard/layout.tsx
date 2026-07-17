@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { me, clearToken, getToken, ROLE_LABEL, User } from "@/lib/api";
+import { ToastProvider } from "@/components/Toast";
 
 const NAV: { href: string; label: string; roles: User["role"][] }[] = [
   { href: "/dashboard", label: "Overview",
@@ -101,7 +102,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </button>
         </div>
       </aside>
-      <main className="p-5 md:p-8">{children}</main>
+      <main className="p-5 md:p-8"><ToastProvider>{children}</ToastProvider></main>
     </div>
   );
 }
