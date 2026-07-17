@@ -99,6 +99,33 @@ export async function openPdf(path: string): Promise<void> {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
+export async function downloadFile(path: string, fallbackName: string): Promise<void> {
+  const headers = new Headers();
+  const token = getToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const res = await fetch(`${API}${path}`, { headers });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const body = await res.json();
+      detail = typeof body.detail === "string" ? body.detail : detail;
+    } catch { /* non-JSON */ }
+    throw new ApiError(res.status, detail);
+  }
+  // honour the server's filename if it sent one
+  const dispo = res.headers.get("content-disposition") ?? "";
+  const match = /filename="?([^";]+)"?/.exec(dispo);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = match?.[1] ?? fallbackName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
 export const ROLE_LABEL: Record<User["role"], string> = {
   super_admin: "Platform owner",
   school_admin: "School admin",

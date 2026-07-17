@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, downloadFile } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 
 type Term = {
@@ -93,6 +93,16 @@ export default function SetupPage() {
       }
     } catch (e) {
       toast.err(e instanceof ApiError ? e.message : "Could not send the test SMS.");
+    } finally { setBusy(null); }
+  }
+
+  async function exportSchoolData() {
+    setBusy("export");
+    try {
+      await downloadFile("/api/export/school.xlsx", "fiyox-school-export.xlsx");
+      toast.ok("Your export is downloading — one Excel file with all your school's records.");
+    } catch (e) {
+      toast.err(e instanceof ApiError ? e.message : "Could not build the export.");
     } finally { setBusy(null); }
   }
 
@@ -373,6 +383,21 @@ export default function SetupPage() {
           </div>
         </section>
       )}
+
+      {/* the school's data belongs to the school */}
+      <section className="rounded-lg border border-line bg-card p-4 space-y-2">
+        <p className="text-sm font-medium">Your data</p>
+        <p className="text-xs text-ink-soft">
+          Download everything — students, guardians, staff, results, subject
+          scores, invoices, payments and attendance — as one Excel workbook.
+          Your school&apos;s records belong to your school, and you can take them
+          with you at any time.
+        </p>
+        <button onClick={exportSchoolData} disabled={busy !== null}
+                className="rounded-md border border-ink text-ink px-4 py-2 text-sm font-medium hover:bg-ink hover:text-white disabled:opacity-40">
+          {busy === "export" ? "Preparing…" : "Download full export (.xlsx)"}
+        </button>
+      </section>
 
       {/* branding */}
       {school && (

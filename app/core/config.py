@@ -25,7 +25,13 @@ class Settings(BaseSettings):
     # Nigerian integrations (filled in later phases)
     PAYSTACK_SECRET_KEY: str | None = None
     TERMII_API_KEY: str | None = None
-    TERMII_SENDER_ID: str = "Fiyox"
+    # "Termii" works out of the box with no sender-ID registration; switch to a
+    # branded name (e.g. "Fiyox") once it is approved on the Termii dashboard
+    TERMII_SENDER_ID: str = "Termii"
+    # "dnd" is Termii's transactional route: it reaches DND-enabled numbers and
+    # is the correct channel for verification codes. "generic" is promotional —
+    # cheaper, but skips DND numbers and MTN blocks it overnight (8pm-8am).
+    TERMII_CHANNEL: str = "dnd"
 
     @field_validator("DATABASE_URL")
     @classmethod

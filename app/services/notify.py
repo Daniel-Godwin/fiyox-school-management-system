@@ -52,14 +52,15 @@ class MockProvider:
 class TermiiProvider:
     name = "termii"
 
-    def __init__(self, api_key: str, sender_id: str):
+    def __init__(self, api_key: str, sender_id: str, channel: str = "dnd"):
         self.api_key = api_key
         self.sender_id = sender_id
+        self.channel = channel
 
     async def send_sms(self, to: str, body: str) -> tuple[MessageStatus, str | None, str | None]:
         payload = {
             "to": normalize_msisdn(to), "from": self.sender_id, "sms": body,
-            "type": "plain", "channel": "generic", "api_key": self.api_key,
+            "type": "plain", "channel": self.channel, "api_key": self.api_key,
         }
         try:
             async with httpx.AsyncClient(timeout=15) as client:
@@ -74,8 +75,9 @@ class TermiiProvider:
 
 def get_provider():
     if settings.TERMII_API_KEY:
-        sender = getattr(settings, "TERMII_SENDER_ID", None) or "Fiyox"
-        return TermiiProvider(settings.TERMII_API_KEY, sender)
+        sender = getattr(settings, "TERMII_SENDER_ID", None) or "Termii"
+        channel = getattr(settings, "TERMII_CHANNEL", None) or "dnd"
+        return TermiiProvider(settings.TERMII_API_KEY, sender, channel)
     return MockProvider()
 
 
