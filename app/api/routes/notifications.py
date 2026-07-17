@@ -169,6 +169,9 @@ async def send_test_sms(
     delivered = log.status.value if hasattr(log.status, "value") else str(log.status)
     return {
         "provider": provider.name,
+        "endpoint": (settings.TERMII_BASE_URL if provider.name == "termii" else None),
+        "sender_id": (settings.TERMII_SENDER_ID if provider.name == "termii" else None),
+        "channel": (settings.TERMII_CHANNEL if provider.name == "termii" else None),
         "sent_to": normalize_msisdn(payload.phone),
         "status": delivered,
         "ok": delivered in ("sent", "mock"),

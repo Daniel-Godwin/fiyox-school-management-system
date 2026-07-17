@@ -17,7 +17,9 @@ from app.models.notifications import (
     MessageLog, Channel, MessageStatus, MessagePurpose,
 )
 
-TERMII_SMS_URL = "https://api.termii.com/api/sms/send"
+def _termii_sms_url() -> str:
+    base = (settings.TERMII_BASE_URL or "https://v3.api.termii.com").rstrip("/")
+    return f"{base}/api/sms/send"
 
 
 def normalize_msisdn(raw: str) -> str:
@@ -64,7 +66,7 @@ class TermiiProvider:
         }
         try:
             async with httpx.AsyncClient(timeout=15) as client:
-                r = await client.post(TERMII_SMS_URL, json=payload)
+                r = await client.post(_termii_sms_url(), json=payload)
                 data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
                 if r.status_code == 200 and data.get("message_id"):
                     return MessageStatus.SENT, str(data["message_id"]), None

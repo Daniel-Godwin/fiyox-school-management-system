@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     # Nigerian integrations (filled in later phases)
     PAYSTACK_SECRET_KEY: str | None = None
     TERMII_API_KEY: str | None = None
+    # Termii gives every account its own base URL — it is shown on your Termii
+    # dashboard. Newer accounts are typically https://v3.api.termii.com; older
+    # ones https://api.ng.termii.com. A wrong host answers 401 "Invalid API
+    # Key" even when the key is right.
+    TERMII_BASE_URL: str = "https://v3.api.termii.com"
     # "Termii" works out of the box with no sender-ID registration; switch to a
     # branded name (e.g. "Fiyox") once it is approved on the Termii dashboard
     TERMII_SENDER_ID: str = "Termii"

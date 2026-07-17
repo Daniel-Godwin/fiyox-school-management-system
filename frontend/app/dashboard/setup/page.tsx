@@ -80,7 +80,7 @@ export default function SetupPage() {
   async function sendTestSms() {
     setBusy("sms");
     try {
-      const r = await api<{ ok: boolean; status: string; provider: string; error: string | null; note: string; sent_to: string }>(
+      const r = await api<{ ok: boolean; status: string; provider: string; error: string | null; note: string; sent_to: string; endpoint: string | null }>(
         "/api/notifications/test-sms", {
           method: "POST", body: JSON.stringify({ phone: testPhone.trim() }),
         });
@@ -89,7 +89,7 @@ export default function SetupPage() {
       } else if (r.ok) {
         toast.ok(`Message sent to ${r.sent_to}. If it doesn't arrive shortly, your sender ID may still be pending approval.`);
       } else {
-        toast.err(`Termii rejected the message: ${r.error ?? "unknown error"}`);
+        toast.err(`Termii rejected the message (via ${r.endpoint ?? "?"}): ${r.error ?? "unknown error"}`);
       }
     } catch (e) {
       toast.err(e instanceof ApiError ? e.message : "Could not send the test SMS.");
