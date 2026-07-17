@@ -23,12 +23,32 @@ body {
 
 /* ---- typography scale: readable on a phone held at arm's length ---- */
 html {
-  font-size: 17px;                 /* raises every rem-based Tailwind size */
-  -webkit-text-size-adjust: 100%;  /* stop iOS inflating text unpredictably */
+  font-size: 18px;                 /* raises every rem-based Tailwind size */
+  -webkit-text-size-adjust: 100%;  /* stop mobile browsers inflating text unpredictably */
 }
 @media (min-width: 768px) {
-  html { font-size: 16.5px; }
+  html { font-size: 17px; }
 }
+
+/* Most body copy in the app uses Tailwind's text-sm / text-xs tiers; lift
+   their floors so "small" never means "squint". */
+.text-sm { font-size: 0.95rem !important; line-height: 1.5rem !important; }
+.text-xs { font-size: 0.83rem !important; line-height: 1.2rem !important; }
+@media (max-width: 767px) {
+  .text-sm { font-size: 1rem !important; line-height: 1.55rem !important; }
+  .text-xs { font-size: 0.875rem !important; line-height: 1.3rem !important; }
+}
+
+/* ---- hard stop on horizontal drift ("floating") ----
+   One element wider than the screen makes the whole page pan sideways and
+   everything look loose. Clamp the page, and let flex/grid children shrink
+   (min-width:auto is the classic culprit that stops them). */
+html, body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+* { min-width: 0; }
+img, svg, video, canvas { max-width: 100%; height: auto; }
 
 h1, h2, h3, .display {
   font-family: var(--font-display);

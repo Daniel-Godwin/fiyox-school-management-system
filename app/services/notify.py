@@ -76,10 +76,11 @@ class TermiiProvider:
 
 
 def get_provider():
-    if settings.TERMII_API_KEY:
-        sender = getattr(settings, "TERMII_SENDER_ID", None) or "Termii"
-        channel = getattr(settings, "TERMII_CHANNEL", None) or "dnd"
-        return TermiiProvider(settings.TERMII_API_KEY, sender, channel)
+    key = (settings.TERMII_API_KEY or "").strip()
+    if key:
+        sender = (getattr(settings, "TERMII_SENDER_ID", None) or "Termii").strip()
+        channel = (getattr(settings, "TERMII_CHANNEL", None) or "dnd").strip()
+        return TermiiProvider(key, sender, channel)
     return MockProvider()
 
 
