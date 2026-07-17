@@ -161,3 +161,18 @@ async def confirm_code(payload: ConfirmIn, request: Request, db: DbDep,
                        ip_address=request.client.host if request.client else None)
     await db.commit()
     return {"verified": True, "channel": payload.channel.value}
+
+
+@router.get("/availability")
+async def verification_availability(user: CurrentUser):
+    """Which verification channels can actually deliver right now?
+
+    The parent-facing UI must not invite anyone to "send a code" that cannot
+    arrive. When SMS is in preview mode (no Termii key), phone verification is
+    reported unavailable and the banner simply does not render.
+    """
+    from app.services.notify import get_provider
+    return {
+        "phone": get_provider().name != "mock",
+        "email": False,   # becomes true when a mail provider is wired
+    }

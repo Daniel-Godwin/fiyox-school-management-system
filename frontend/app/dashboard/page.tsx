@@ -9,9 +9,13 @@ type Term = { id: string; name: string; session: string; is_current: boolean;
               next_term_begins: string | null };
 type FeeSummary = { collected: number; expected: number; collection_rate: number };
 type Ward = { name: string };
+type SetupState = {
+  terms: boolean; classes: boolean; subjects: boolean;
+  students: boolean; teachers: boolean; fees: boolean;
+};
 
 function naira(n: number) {
-  return "\u20A6" + n.toLocaleString("en-NG", { maximumFractionDigits: 0 });
+  return "₦" + n.toLocaleString("en-NG", { maximumFractionDigits: 0 });
 }
 
 function StatCard({ href, label, value, hint, tone = "ink" }: {
@@ -51,6 +55,7 @@ export default function Overview() {
   const [fees, setFees] = useState<FeeSummary | null>(null);
   const [wards, setWards] = useState<Ward[] | null>(null);
   const [atRisk, setAtRisk] = useState<number | null>(null);
+  const [setup, setSetup] = useState<SetupState | null>(null);
 
   useEffect(() => {
     me().then((u) => {
@@ -71,6 +76,22 @@ export default function Overview() {
 
       if (staff) {
         api<Student[]>("/api/students").then((s) => setStudents(s.length)).catch(() => {});
+      }
+      if (["super_admin", "school_admin"].includes(u.role)) {
+        // is this a brand-new school? compute the setup checklist
+        Promise.all([
+          api<unknown[]>("/api/academics/terms").catch(() => []),
+          api<unknown[]>("/api/academics/arms").catch(() => []),
+          api<unknown[]>("/api/academics/subjects").catch(() => []),
+          api<Student[]>("/api/students").catch(() => []),
+          api<unknown[]>("/api/users?role=teacher").catch(() => []),
+          api<unknown[]>("/api/fees/categories").catch(() => []),
+        ]).then(([t, a, sub, st, te, fc]) => {
+          setSetup({
+            terms: t.length > 0, classes: a.length > 0, subjects: sub.length > 0,
+            students: st.length > 0, teachers: te.length > 0, fees: fc.length > 0,
+          });
+        });
       }
       if (u.role === "parent" || u.role === "student") {
         api<Ward[]>("/api/my/wards").then(setWards).catch(() => {});
@@ -107,22 +128,59 @@ export default function Overview() {
         </p>
       </header>
 
+      {isAdmin && setup && Object.values(setup).some((done) => !done) && (
+        <section className="rounded-xl border border-brass bg-brass/10 p-5">
+          <h2 className="text-base font-semibold">Set up your school</h2>
+          <p className="text-sm text-ink-soft mt-1 mb-4">
+            Work through these in order — each step unlocks the next. The quick
+            setup on the School setup page can do the first three at once.
+          </p>
+          <ol className="space-y-2">
+            {([
+              { done: setup.terms, label: "Create the session and terms", href: "/dashboard/setup" },
+              { done: setup.classes, label: "Add your classes and arms (JSS1 A…)", href: "/dashboard/setup" },
+              { done: setup.subjects, label: "Add the subjects you teach", href: "/dashboard/setup" },
+              { done: setup.students, label: "Admit your students", href: "/dashboard/students" },
+              { done: setup.teachers, label: "Create teacher accounts and assign subjects", href: "/dashboard/users" },
+              { done: setup.fees, label: "Set up fee categories and amounts", href: "/dashboard/fees" },
+            ]).map((step, i) => (
+              <li key={i}>
+                <Link href={step.href}
+                      className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 text-sm ${
+                        step.done
+                          ? "border-ledger/30 bg-ledger/5 text-ink-soft"
+                          : "border-line bg-white hover:border-ink"}`}>
+                  <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                    step.done ? "bg-ledger text-white" : "bg-paper border border-line text-ink-soft"}`}>
+                    {step.done ? "✓" : i + 1}
+                  </span>
+                  <span className={step.done ? "line-through decoration-ink-soft/40" : "font-medium"}>
+                    {step.label}
+                  </span>
+                  {!step.done && <span className="ml-auto text-ink-soft">→</span>}
+                </Link>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
       {staff && (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <StatCard href="/dashboard/students" label="Students"
-                    value={students?.toLocaleString() ?? "\u2014"}
-                    hint="View the register \u2192" />
+                    value={students?.toLocaleString() ?? "—"}
+                    hint="View the register →" />
           {isBursar && fees && (
             <StatCard href="/dashboard/fees" label="Fees collected"
                       value={`${Math.round(fees.collection_rate)}%`}
                       tone={fees.collection_rate >= 70 ? "ledger" : "brass"}
-                      hint={`${naira(fees.collected)} of ${naira(fees.expected)} \u2192`} />
+                      hint={`${naira(fees.collected)} of ${naira(fees.expected)} →`} />
           )}
           {atRisk !== null && (
             <StatCard href="/dashboard/end-of-term" label="Need attention"
                       value={atRisk.toString()}
                       tone={atRisk === 0 ? "ledger" : "sanction"}
-                      hint={atRisk === 0 ? "All students on track" : "Review the register \u2192"} />
+                      hint={atRisk === 0 ? "All students on track" : "Review the register →"} />
           )}
         </div>
       )}
@@ -148,12 +206,12 @@ export default function Overview() {
       {family && (
         <div className="grid sm:grid-cols-2 gap-4">
           <StatCard href="/dashboard/wards" label="My children"
-                    value={wards ? wards.length.toString() : "\u2014"}
+                    value={wards ? wards.length.toString() : "—"}
                     hint={wards && wards.length > 0
                       ? wards.map((w) => w.name).join(", ")
-                      : "View results & fees \u2192"} />
+                      : "View results & fees →"} />
           <StatCard href="/dashboard/timetable" label="Timetable"
-                    value="View" hint="This week's lessons \u2192" />
+                    value="View" hint="This week's lessons →" />
         </div>
       )}
     </div>

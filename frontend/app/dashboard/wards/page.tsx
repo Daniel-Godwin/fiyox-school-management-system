@@ -31,9 +31,16 @@ export default function WardsPage() {
   const [self, setSelf] = useState<User | null>(null);
   const [codeSent, setCodeSent] = useState(false);
   const [verifyCode, setVerifyCode] = useState("");
+  const [smsAvailable, setSmsAvailable] = useState(false);
   const toast = useToast();
 
-  useEffect(() => { me().then(setSelf).catch(() => {}); }, []);
+  useEffect(() => {
+    me().then(setSelf).catch(() => {});
+    // only invite the parent to verify if a code can actually be delivered
+    api<{ phone: boolean }>("/api/verify/availability")
+      .then((a) => setSmsAvailable(a.phone))
+      .catch(() => setSmsAvailable(false));
+  }, []);
 
   async function requestVerifyCode() {
     setBusy("verify-request");
@@ -180,7 +187,7 @@ export default function WardsPage() {
         </div>
       )}
 
-      {self && self.role === "parent" && self.phone && self.phone_verified === false && (
+      {smsAvailable && self && self.role === "parent" && self.phone && self.phone_verified === false && (
         <div className="rounded-lg border border-brass bg-brass/10 p-3 text-sm space-y-2">
           <p>
             <b>Confirm your phone number</b> so results alerts and fee reminders

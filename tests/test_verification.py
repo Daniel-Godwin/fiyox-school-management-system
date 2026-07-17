@@ -147,3 +147,13 @@ async def test_user_without_phone_gets_a_clear_message(ctx):
                           json={"channel": "phone"})
     assert r.status_code == 400
     assert "No phone" in r.json()["detail"]
+
+
+async def test_phone_verification_is_reported_unavailable_without_a_provider(ctx):
+    """No SMS key -> the UI must not invite parents to request a code."""
+    client, ids = ctx
+    await _parent_with_phone(client, ids)
+    ph = await headers(client, "vparent@x.ng", "par12345")
+    avail = (await client.get("/api/verify/availability", headers=ph)).json()
+    assert avail["phone"] is False
+    assert avail["email"] is False
