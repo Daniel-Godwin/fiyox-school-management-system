@@ -9,6 +9,7 @@ import secrets
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
+from pydantic import BaseModel
 from app.core.deps import DbDep, require_roles, tenant_scope
 from app.core.security import hash_password
 from app.models.school import User, Role
@@ -87,11 +88,161 @@ async def list_users(
     role: Role | None = Query(None),
 ):
     school_id = tenant_scope(admin)
-    stmt = select(User).where(User.school_id == school_id)
+    stmt = select(User).where(User.school_id == school_id,
+                              User.deleted_at.is_(None))
     if role:
         stmt = stmt.where(User.role == role)
     rows = (await db.execute(stmt.order_by(User.last_name))).scalars().all()
     return list(rows)
+
+
+class UserEditIn(BaseModel):
+    first_name: str | None = None
+    last_name: str | None = None
+    email: str | None = None
+    phone: str | None = None
+
+
+@router.patch("/{user_id}")
+async def edit_user(
+    user_id: str, payload: UserEditIn, request: Request, db: DbDep,
+    admin: Annotated[User, AdminOnly],
+):
+    """Correct a mistake in an account — a misspelt name, a wrong email or phone.
+
+    Deliberately NOT editable here: the role. A "teacher" who should have been
+    a "parent" has the wrong relationship to everything (assignments, wards),
+    so the honest fix is to deactivate the mistake and create the right
+    account — not to mutate one kind of user into another.
+    """
+    school_id = tenant_scope(admin)
+    user = await db.get(User, user_id)
+    if not user or user.school_id != school_id:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    changes = {}
+    if payload.email and payload.email.lower() != user.email:
+        new_email = payload.email.strip().lower()
+        dup = (await db.execute(select(User).where(
+            User.school_id == school_id, User.email == new_email,
+            User.id != user.id))).scalars().first()
+        if dup:
+            raise HTTPException(status_code=409,
+                                detail="Another account already uses that email")
+        changes["email"] = {"old": user.email, "new": new_email}
+        user.email = new_email
+        # a changed email is a changed contact — it must be re-verified
+        if user.email_verified:
+            changes["email_verified"] = {"old": True, "new": False}
+            user.email_verified = False
+
+    if payload.phone is not None and payload.phone.strip() != (user.phone or ""):
+        new_phone = payload.phone.strip() or None
+        changes["phone"] = {"old": user.phone, "new": new_phone}
+        user.phone = new_phone
+        if user.phone_verified:
+            # the tick belongs to the OLD number, not this one
+            changes["phone_verified"] = {"old": True, "new": False}
+            user.phone_verified = False
+
+    for field in ("first_name", "last_name"):
+        value = getattr(payload, field)
+        if value and value.strip() and value.strip() != getattr(user, field):
+            changes[field] = {"old": getattr(user, field), "new": value.strip()}
+            setattr(user, field, value.strip())
+
+    if not changes:
+        return {"id": user.id, "updated": False}
+
+    user.updated_by = admin.id
+    await record_audit(db, school_id=school_id, user_id=admin.id, action="update",
+                       table_name="users", record_id=user.id, changes=changes,
+                       ip_address=request.client.host if request.client else None)
+    await db.commit()
+    return {"id": user.id, "updated": True,
+            "changed": sorted(changes.keys())}
+
+
+@router.delete("/{user_id}")
+async def offboard_user(
+    user_id: str, request: Request, db: DbDep,
+    admin: Annotated[User, AdminOnly],
+):
+    """Offboard someone who has left the school — staff who resigned, a parent
+    whose last ward has gone.
+
+    What happens, deliberately:
+    * The account is closed and sign-in stops working immediately.
+    * A teacher's subject assignments are ended; the marks they entered remain,
+      with their name on the audit trail — history is never rewritten.
+    * A parent's ward links are removed; the students themselves are untouched.
+    * The email address is released, so a corrected or returning account can be
+      created with it later. The original email is preserved in the audit log.
+    * An admin cannot offboard themselves, and the LAST active admin cannot be
+      offboarded at all — a school must never be able to lock itself out.
+    """
+    from datetime import datetime, timezone
+
+    school_id = tenant_scope(admin)
+    user = await db.get(User, user_id)
+    if not user or user.school_id != school_id or user.deleted_at:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user.id == admin.id:
+        raise HTTPException(status_code=400,
+                            detail="You cannot offboard your own account")
+
+    if user.role == Role.SCHOOL_ADMIN:
+        other_admins = (await db.execute(select(User).where(
+            User.school_id == school_id,
+            User.role == Role.SCHOOL_ADMIN,
+            User.id != user.id,
+            User.is_active == True,  # noqa: E712
+            User.deleted_at.is_(None)))).scalars().all()
+        if not other_admins:
+            raise HTTPException(
+                status_code=400,
+                detail="This is the school's only active admin. Create another "
+                       "admin first — a school must never lock itself out.")
+
+    now = datetime.now(timezone.utc)
+    detail = {"role": str(getattr(user.role, "value", user.role)),
+              "email": {"old": user.email, "new": None}}
+
+    # a teacher's sheets are released for reassignment; their entered marks stay
+    if user.role == Role.TEACHER:
+        from app.models.student import TeachingAssignment
+        assignments = (await db.execute(select(TeachingAssignment).where(
+            TeachingAssignment.school_id == school_id,
+            TeachingAssignment.teacher_id == user.id,
+            TeachingAssignment.deleted_at.is_(None)))).scalars().all()
+        for a in assignments:
+            a.deleted_at = now
+        detail["assignments_closed"] = {"old": len(assignments), "new": 0}
+
+    # a parent's view of their wards ends; the students are untouched
+    if user.role == Role.PARENT:
+        links = (await db.execute(select(Guardian).where(
+            Guardian.school_id == school_id,
+            Guardian.parent_user_id == user.id))).scalars().all()
+        for link in links:
+            await db.delete(link)
+        detail["ward_links_removed"] = {"old": len(links), "new": 0}
+
+    # close the account and free the email for future reuse; the audit log
+    # keeps the original address
+    user.is_active = False
+    user.deleted_at = now
+    user.email = f"offboarded-{now.strftime('%Y%m%d%H%M%S')}-{user.email}"
+    user.updated_by = admin.id
+
+    await record_audit(db, school_id=school_id, user_id=admin.id, action="delete",
+                       table_name="users", record_id=user.id, changes=detail,
+                       ip_address=request.client.host if request.client else None)
+    await db.commit()
+    return {"offboarded": True,
+            "note": "The account is closed. Records they created remain on the "
+                    "audit trail under their name."}
 
 
 @router.patch("/{user_id}/status")

@@ -77,6 +77,21 @@ export default function SetupPage() {
   const configured = terms.length > 0;
   const split = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
 
+  async function removeSubject(id: string, name: string) {
+    if (!confirm(
+      `Remove ${name}?\n\nIt leaves the pick lists, its teacher assignments end, and its timetable lessons are removed. Past results and printed report cards keep the subject — history never changes.`
+    )) return;
+    setBusy(`sub-${id}`); setNotice(null);
+    try {
+      const r = await api<{ note: string; assignments_closed: number; lessons_removed: number }>(
+        `/api/academics/subjects/${id}`, { method: "DELETE" });
+      toast.ok(`${name} removed. ${r.note}`);
+      await load();
+    } catch (e) {
+      toast.err(e instanceof ApiError ? e.message : "Could not remove the subject.");
+    } finally { setBusy(null); }
+  }
+
   async function sendTestSms() {
     setBusy("sms");
     try {
@@ -625,8 +640,13 @@ export default function SetupPage() {
             <div className="flex flex-wrap gap-1.5">
               {subjects.map((s) => (
                 <span key={s.id}
-                      className="rounded-full border border-line bg-paper px-3 py-1 text-xs">
+                      className="inline-flex items-center gap-1.5 rounded-full border border-line bg-paper px-3 py-1 text-xs">
                   {s.name}{s.code ? ` (${s.code})` : ""}
+                  <button onClick={() => removeSubject(s.id, s.name)} disabled={busy !== null}
+                          aria-label={`Remove ${s.name}`}
+                          className="text-ink-soft hover:text-sanction disabled:opacity-40">
+                    ×
+                  </button>
                 </span>
               ))}
             </div>

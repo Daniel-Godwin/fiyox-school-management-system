@@ -46,6 +46,8 @@ export default function UsersPage() {
   const [asg, setAsg] = useState({ teacher_id: "", subject_id: "", arm_id: "" });
   const [reveal, setReveal] = useState<{ email: string; temp: string } | null>(null);
   const [wardsFor, setWardsFor] = useState<UserRow | null>(null);
+  const [editing, setEditing] = useState<UserRow | null>(null);
+  const [editForm, setEditForm] = useState({ first_name: "", last_name: "", email: "", phone: "" });
   const [wardList, setWardList] = useState<Ward[] | null>(null);
   const [addWardId, setAddWardId] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -203,6 +205,61 @@ export default function UsersPage() {
       await load();
     } catch (e) {
       setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not create the user." });
+    } finally { setBusy(null); }
+  }
+
+  function openEdit(u: UserRow) {
+    setEditing(u);
+    setEditForm({ first_name: u.first_name, last_name: u.last_name,
+                  email: u.email, phone: u.phone ?? "" });
+    setWardsFor(null);
+    setNotice(null);
+  }
+
+  async function saveEdit() {
+    if (!editing) return;
+    setBusy("edit"); setNotice(null);
+    try {
+      const r = await api<{ updated: boolean; changed?: string[] }>(`/api/users/${editing.id}`, {
+        method: "PATCH", body: JSON.stringify(editForm),
+      });
+      setNotice({
+        kind: "ok",
+        text: r.updated
+          ? `Saved. Changed: ${r.changed?.join(", ")}. A changed email or phone must be verified again.`
+          : "Nothing changed.",
+      });
+      setEditing(null);
+      await load();
+    } catch (e) {
+      setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not save the changes." });
+    } finally { setBusy(null); }
+  }
+
+  async function offboard(u: UserRow) {
+    const consequences: Record<string, string> = {
+      teacher: "Their sign-in stops immediately and their subject assignments end so the sheets can be reassigned. Marks they entered remain, with their name on the audit trail.",
+      parent: "Their sign-in stops immediately and their links to children are removed. The students themselves are untouched.",
+      bursar: "Their sign-in stops immediately. Payments they recorded remain on the record under their name.",
+      school_admin: "Their sign-in stops immediately. The school must always keep at least one active admin.",
+      student: "Their sign-in stops immediately. Their academic records are untouched.",
+    };
+    if (!confirm(
+      `Offboard ${u.first_name} ${u.last_name} (${ROLE_LABEL[u.role] ?? u.role})?
+
+` +
+      `${consequences[u.role] ?? "Their sign-in stops immediately."}
+
+` +
+      `Their email is released so a future account can reuse it. This is for someone who has LEFT the school — for a temporary block, use Deactivate instead.`
+    )) return;
+    setBusy(`o-${u.id}`); setNotice(null);
+    try {
+      const r = await api<{ note: string }>(`/api/users/${u.id}`, { method: "DELETE" });
+      setNotice({ kind: "ok", text: `${u.first_name} ${u.last_name} has been offboarded. ${r.note}` });
+      await load();
+    } catch (e) {
+      setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not offboard this account." });
     } finally { setBusy(null); }
   }
 
@@ -427,6 +484,43 @@ export default function UsersPage() {
         )}
       </section>
 
+      {/* correct a mistake in an account */}
+      {editing && (
+        <section className="rounded-lg border border-brass bg-brass/10 p-4 space-y-3 max-w-3xl">
+          <div className="flex items-baseline justify-between gap-2">
+            <p className="text-sm font-medium">
+              Edit {editing.first_name} {editing.last_name}
+              <span className="ml-2 font-normal text-xs text-ink-soft">{ROLE_LABEL[editing.role] ?? editing.role}</span>
+            </p>
+            <button onClick={() => setEditing(null)}
+                    className="text-xs text-ink-soft underline underline-offset-2">Close</button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <input value={editForm.first_name} placeholder="First name"
+                   onChange={(e) => setEditForm({ ...editForm, first_name: e.target.value })}
+                   className="rounded border border-line px-2 py-1.5 text-sm" />
+            <input value={editForm.last_name} placeholder="Last name"
+                   onChange={(e) => setEditForm({ ...editForm, last_name: e.target.value })}
+                   className="rounded border border-line px-2 py-1.5 text-sm" />
+            <input value={editForm.email} placeholder="Email" type="email"
+                   onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                   className="rounded border border-line px-2 py-1.5 text-sm" />
+            <input value={editForm.phone} placeholder="Phone (e.g. 0803…)" inputMode="tel"
+                   onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+                   className="rounded border border-line px-2 py-1.5 text-sm" />
+          </div>
+          <p className="text-xs text-ink-soft">
+            The role cannot be changed here — a wrong-role account should be offboarded
+            and recreated correctly. Changing the email or phone clears its verified tick
+            until it is verified again.
+          </p>
+          <button onClick={saveEdit} disabled={busy !== null}
+                  className="rounded-md bg-ink text-white px-4 py-2 text-sm font-medium hover:bg-ink-soft disabled:opacity-50">
+            {busy === "edit" ? "Saving…" : "Save changes"}
+          </button>
+        </section>
+      )}
+
       {/* ward management: reconcile an existing parent with their children */}
       {wardsFor && (
         <section className="rounded-lg border border-brass bg-brass/10 p-4 space-y-3 max-w-3xl">
@@ -544,21 +638,31 @@ export default function UsersPage() {
                     {u.is_active ? "Active" : "Deactivated"}
                   </span>
                 </td>
-                <td className="px-3 py-2 text-right whitespace-nowrap">
-                  {u.role === "parent" && (
-                    <button onClick={() => openWards(u)} disabled={busy !== null}
-                            className="text-ink underline underline-offset-2 hover:text-ink-soft disabled:opacity-50 mr-3">
-                      Children
+                <td className="px-3 py-2 text-right">
+                  <div className="flex flex-wrap justify-end gap-x-3 gap-y-1">
+                    <button onClick={() => openEdit(u)} disabled={busy !== null}
+                            className="text-ink underline underline-offset-2 hover:text-ink-soft disabled:opacity-50">
+                      Edit
                     </button>
-                  )}
-                  <button onClick={() => resetPassword(u)} disabled={busy !== null}
-                          className="text-ink underline underline-offset-2 hover:text-ink-soft disabled:opacity-50 mr-3">
-                    {busy === `r-${u.id}` ? "Resetting…" : "Reset password"}
-                  </button>
-                  <button onClick={() => setStatus(u)} disabled={busy !== null}
-                          className="text-ink underline underline-offset-2 hover:text-ink-soft disabled:opacity-50">
-                    {busy === u.id ? "Saving…" : u.is_active ? "Deactivate" : "Reactivate"}
-                  </button>
+                    {u.role === "parent" && (
+                      <button onClick={() => openWards(u)} disabled={busy !== null}
+                              className="text-ink underline underline-offset-2 hover:text-ink-soft disabled:opacity-50">
+                        Children
+                      </button>
+                    )}
+                    <button onClick={() => resetPassword(u)} disabled={busy !== null}
+                            className="text-ink underline underline-offset-2 hover:text-ink-soft disabled:opacity-50">
+                      {busy === `r-${u.id}` ? "Resetting…" : "Reset password"}
+                    </button>
+                    <button onClick={() => setStatus(u)} disabled={busy !== null}
+                            className="text-ink underline underline-offset-2 hover:text-ink-soft disabled:opacity-50">
+                      {busy === u.id ? "Saving…" : u.is_active ? "Deactivate" : "Reactivate"}
+                    </button>
+                    <button onClick={() => offboard(u)} disabled={busy !== null}
+                            className="text-sanction underline underline-offset-2 hover:opacity-70 disabled:opacity-50">
+                      {busy === `o-${u.id}` ? "Offboarding…" : "Offboard"}
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

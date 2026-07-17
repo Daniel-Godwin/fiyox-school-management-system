@@ -59,7 +59,7 @@ async def list_subjects(db: DbDep, user: CurrentUser):
 
 # ---------- Academic setup (school admin writes) ----------
 from typing import Annotated
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from app.core.deps import require_roles
 from app.models.school import User, Role
 from app.models.results import AssessmentComponent
@@ -380,3 +380,59 @@ async def transfer_students(payload: TransferIn, db: DbDep,
         moved += 1
     await db.commit()
     return {"moved": moved}
+
+
+@router.delete("/subjects/{subject_id}")
+async def remove_subject(subject_id: str, request: Request, db: DbDep,
+                         user: Annotated[User, AdminOnly]):
+    """Retire a subject the school no longer teaches.
+
+    History is sacred: past results and printed report cards keep the subject's
+    name forever. What ends is the *future* — the subject leaves the pick
+    lists, its teaching assignments are closed, and any timetable lessons for
+    it are removed. Nothing a parent already received changes.
+    """
+    from datetime import datetime, timezone
+    from app.models.timetable import Lesson
+    from app.models.student import TeachingAssignment
+    from app.models.results import ScoreEntry
+
+    school_id = tenant_scope(user)
+    subject = await db.get(Subject, subject_id)
+    if not subject or subject.school_id != school_id or subject.deleted_at:
+        raise HTTPException(status_code=404, detail="Subject not found")
+
+    now = datetime.now(timezone.utc)
+
+    assignments = (await db.execute(select(TeachingAssignment).where(
+        TeachingAssignment.school_id == school_id,
+        TeachingAssignment.subject_id == subject_id,
+        TeachingAssignment.deleted_at.is_(None)))).scalars().all()
+    for a in assignments:
+        a.deleted_at = now
+
+    lessons = (await db.execute(select(Lesson).where(
+        Lesson.school_id == school_id,
+        Lesson.subject_id == subject_id,
+        Lesson.deleted_at.is_(None)))).scalars().all()
+    for l in lessons:
+        l.deleted_at = now
+
+    has_scores = (await db.execute(select(ScoreEntry).where(
+        ScoreEntry.school_id == school_id,
+        ScoreEntry.subject_id == subject_id))).scalars().first() is not None
+
+    subject.deleted_at = now
+    subject.updated_by = user.id
+    await record_audit(db, school_id=school_id, user_id=user.id, action="delete",
+                       table_name="subjects", record_id=subject.id,
+                       changes={"name": {"old": subject.name, "new": None}},
+                       ip_address=request.client.host if request.client else None)
+    await db.commit()
+    return {"removed": True,
+            "assignments_closed": len(assignments),
+            "lessons_removed": len(lessons),
+            "history_kept": has_scores,
+            "note": ("Past results and report cards keep this subject."
+                     if has_scores else
+                     "No scores were ever recorded for it.")}
