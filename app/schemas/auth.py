@@ -22,3 +22,6 @@ class UserOut(BaseModel):
     first_name: str
     last_name: str
     school_id: str | None = None
+    phone: str | None = None
+    phone_verified: bool = False
+    email_verified: bool = False

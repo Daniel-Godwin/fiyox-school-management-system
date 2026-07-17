@@ -6,7 +6,8 @@ import { api, ApiError } from "@/lib/api";
 type Role = "school_admin" | "bursar" | "teacher" | "parent" | "student";
 type UserRow = {
   id: string; email: string; role: Role; first_name: string; last_name: string;
-  phone: string | null; is_active: boolean;
+  phone: string | null; phone_verified: boolean; email_verified: boolean;
+  is_active: boolean;
 };
 type Student = { id: string; admission_number: string; first_name: string; last_name: string };
 type Arm = { id: string; label: string };
@@ -520,7 +521,21 @@ export default function UsersPage() {
           <tbody>
             {users.map((u, i) => (
               <tr key={u.id} className={i % 2 ? "bg-paper" : "bg-card"}>
-                <td className="px-3 py-2 whitespace-nowrap">{u.first_name} {u.last_name}</td>
+                <td className="px-3 py-2 whitespace-nowrap">
+                  {u.first_name} {u.last_name}
+                  {u.role === "parent" && u.phone && (
+                    <span
+                      title={u.phone_verified
+                        ? "Phone number verified — SMS reaches this parent"
+                        : "Phone number not yet verified"}
+                      className={`ml-2 inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                        u.phone_verified
+                          ? "bg-ledger/10 text-ledger"
+                          : "bg-paper text-ink-soft border border-line"}`}>
+                      {u.phone_verified ? "✓ phone" : "unverified"}
+                    </span>
+                  )}
+                </td>
                 <td className="px-3 py-2">{u.email}</td>
                 <td className="px-3 py-2">{ROLE_LABEL[u.role] ?? u.role}</td>
                 <td className="px-3 py-2">

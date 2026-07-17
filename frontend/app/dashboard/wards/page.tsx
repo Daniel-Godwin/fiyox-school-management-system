@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, openPdf, ApiError } from "@/lib/api";
+import { api, openPdf, ApiError, me, User } from "@/lib/api";
+import { useToast } from "@/components/Toast";
 
 type Term = { id: string; name: string; session: string; is_current: boolean };
 type Ward = { student_id: string; name: string; admission_number: string; class_label: string };
@@ -27,6 +28,45 @@ export default function WardsPage() {
   const [results, setResults] = useState<Record<string, ResultState>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [self, setSelf] = useState<User | null>(null);
+  const [codeSent, setCodeSent] = useState(false);
+  const [verifyCode, setVerifyCode] = useState("");
+  const toast = useToast();
+
+  useEffect(() => { me().then(setSelf).catch(() => {}); }, []);
+
+  async function requestVerifyCode() {
+    setBusy("verify-request");
+    try {
+      const r = await api<{ sent: boolean; note: string }>("/api/verify/request", {
+        method: "POST", body: JSON.stringify({ channel: "phone" }),
+      });
+      if (r.sent) {
+        setCodeSent(true);
+        toast.info(r.note);
+      } else {
+        toast.info(r.note);
+      }
+    } catch (e) {
+      toast.err(e instanceof ApiError ? e.message : "Could not send the code.");
+    } finally { setBusy(null); }
+  }
+
+  async function confirmVerifyCode() {
+    setBusy("verify-confirm");
+    try {
+      await api("/api/verify/confirm", {
+        method: "POST",
+        body: JSON.stringify({ channel: "phone", code: verifyCode.trim() }),
+      });
+      toast.ok("Phone verified — the school's messages will reach you.");
+      setCodeSent(false);
+      setVerifyCode("");
+      me().then(setSelf).catch(() => {});
+    } catch (e) {
+      toast.err(e instanceof ApiError ? e.message : "That code was not accepted.");
+    } finally { setBusy(null); }
+  }
   const [justPaid, setJustPaid] = useState(false);
 
   // Paystack returns the parent here with ?paid=1 after checkout. The payment
@@ -137,6 +177,36 @@ export default function WardsPage() {
             with Paystack, usually within a few seconds. Refresh if it still shows
             the old balance.
           </span>
+        </div>
+      )}
+
+      {self && self.role === "parent" && self.phone && self.phone_verified === false && (
+        <div className="rounded-lg border border-brass bg-brass/10 p-3 text-sm space-y-2">
+          <p>
+            <b>Confirm your phone number</b> so results alerts and fee reminders
+            reach you. We&apos;ll send a 6-digit code to {self.phone}.
+          </p>
+          {!codeSent ? (
+            <button onClick={requestVerifyCode} disabled={busy !== null}
+                    className="rounded-md bg-ink text-white px-3 py-1.5 text-sm font-medium hover:bg-ink-soft disabled:opacity-50">
+              {busy === "verify-request" ? "Sending…" : "Send the code"}
+            </button>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <input value={verifyCode} onChange={(e) => setVerifyCode(e.target.value)}
+                     placeholder="6-digit code" inputMode="numeric" maxLength={6}
+                     className="rounded border border-line px-2 py-1.5 text-sm w-32 tabular" />
+              <button onClick={confirmVerifyCode}
+                      disabled={busy !== null || verifyCode.trim().length !== 6}
+                      className="rounded-md bg-ink text-white px-3 py-1.5 text-sm font-medium hover:bg-ink-soft disabled:opacity-50">
+                {busy === "verify-confirm" ? "Checking…" : "Verify"}
+              </button>
+              <button onClick={requestVerifyCode} disabled={busy !== null}
+                      className="text-xs text-ink-soft underline underline-offset-2">
+                Resend
+              </button>
+            </div>
+          )}
         </div>
       )}
 

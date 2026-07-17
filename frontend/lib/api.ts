@@ -9,6 +9,9 @@ export type User = {
   first_name: string;
   last_name: string;
   school_id: string | null;
+  phone?: string | null;
+  phone_verified?: boolean;
+  email_verified?: boolean;
 };
 
 export function getToken(): string | null {

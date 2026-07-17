@@ -25,6 +25,8 @@ class UserAdminOut(BaseModel):
     first_name: str
     last_name: str
     phone: str | None = None
+    phone_verified: bool = False
+    email_verified: bool = False
     is_active: bool
 
 

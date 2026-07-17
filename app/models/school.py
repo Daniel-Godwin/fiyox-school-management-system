@@ -70,4 +70,8 @@ class User(Base, UUIDMixin, TimestampMixin):
     first_name: Mapped[str] = mapped_column(String(100))
     last_name: Mapped[str] = mapped_column(String(100))
     phone: Mapped[str | None] = mapped_column(String(40))
+    # set only by the verification flow — never directly by an admin — so a
+    # tick genuinely means "a code sent to this contact came back correct"
+    phone_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

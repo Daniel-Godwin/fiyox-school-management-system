@@ -17,6 +17,7 @@ from app.models.fees import (
 from app.models.attendance import Attendance, AttendanceStatus
 from app.models.communication import Announcement, AnnouncementTarget
 from app.models.timetable import Period, Lesson, Weekday, WEEKDAY_ORDER
+from app.models.verification import VerificationCode, VerifyChannel, VerifyPurpose
 from app.models.notifications import (
     MessageLog, Channel, MessageStatus, MessagePurpose,
 )
@@ -34,4 +35,5 @@ __all__ = [
     "Announcement", "AnnouncementTarget",
     "MessageLog", "Channel", "MessageStatus", "MessagePurpose",
     "Period", "Lesson", "Weekday", "WEEKDAY_ORDER",
+    "VerificationCode", "VerifyChannel", "VerifyPurpose",
 ]
