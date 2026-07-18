@@ -12,7 +12,7 @@ Two pieces:
 """
 import enum
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Time, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, Time, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TenantMixin, TimestampMixin, UUIDMixin
@@ -33,8 +33,13 @@ WEEKDAY_ORDER = [d.value for d in Weekday]
 class Period(Base, UUIDMixin, TimestampMixin, TenantMixin):
     """A time row on the timetable, e.g. 'Period 1' 08:00-08:40, or 'Break'."""
     __tablename__ = "periods"
+    # uniqueness applies to LIVE rows only: a deleted period must not block a
+    # new one from taking its row number (partial unique index, both dialects)
     __table_args__ = (
-        UniqueConstraint("school_id", "sequence", name="uq_period_sequence"),
+        Index("uq_period_sequence_active", "school_id", "sequence",
+              unique=True,
+              sqlite_where=text("deleted_at IS NULL"),
+              postgresql_where=text("deleted_at IS NULL")),
     )
 
     name: Mapped[str] = mapped_column(String(40))
@@ -49,9 +54,12 @@ class Lesson(Base, UUIDMixin, TimestampMixin, TenantMixin):
     """One cell: this arm, this day, this period — this subject, this teacher."""
     __tablename__ = "lessons"
     __table_args__ = (
-        # an arm cannot be in two lessons at the same time
-        UniqueConstraint("school_id", "arm_id", "day", "period_id",
-                         name="uq_lesson_arm_slot"),
+        # an arm cannot be in two LIVE lessons at the same time; removed
+        # lessons must not haunt the slot (partial unique index)
+        Index("uq_lesson_arm_slot_active", "school_id", "arm_id", "day",
+              "period_id", unique=True,
+              sqlite_where=text("deleted_at IS NULL"),
+              postgresql_where=text("deleted_at IS NULL")),
     )
 
     arm_id: Mapped[str] = mapped_column(ForeignKey("class_arms.id"), index=True)

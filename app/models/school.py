@@ -54,6 +54,9 @@ class School(Base, UUIDMixin, TimestampMixin):
     # per-school configurable grading & policies
     grading_config: Mapped[dict] = mapped_column(JSON, default=DEFAULT_GRADING)
     withhold_results_on_debt: Mapped[bool] = mapped_column(Boolean, default=False)
+    # parents only see "Pay online" when the school has switched it on; pilots
+    # start with it off until the school is ready for live payments
+    online_payments_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 

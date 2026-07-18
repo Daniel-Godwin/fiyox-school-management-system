@@ -172,7 +172,9 @@ async def verification_availability(user: CurrentUser):
     reported unavailable and the banner simply does not render.
     """
     from app.services.notify import get_provider
+    from app.services.paystack import gateway_configured
     return {
         "phone": get_provider().name != "mock",
         "email": False,   # becomes true when a mail provider is wired
+        "online_payments": gateway_configured(),
     }

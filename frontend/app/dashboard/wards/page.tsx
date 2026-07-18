@@ -6,7 +6,7 @@ import { useToast } from "@/components/Toast";
 
 type Term = { id: string; name: string; session: string; is_current: boolean };
 type Ward = { student_id: string; name: string; admission_number: string; class_label: string };
-type FeeView = { id: string; student_id: string; invoice_number: string; amount: number; paid: number; balance: number; status: string };
+type FeeView = { id: string; student_id: string; invoice_number: string; amount: number; paid: number; balance: number; status: string; can_pay_online?: boolean };
 type AttSummary = { days_recorded: number; present: number; absent: number; late: number; excused: number };
 type Report = { summary: { average: number; position: number; class_size: number; grand_total: number } };
 
@@ -32,14 +32,15 @@ export default function WardsPage() {
   const [codeSent, setCodeSent] = useState(false);
   const [verifyCode, setVerifyCode] = useState("");
   const [smsAvailable, setSmsAvailable] = useState(false);
+  const [payAvailable, setPayAvailable] = useState(false);
   const toast = useToast();
 
   useEffect(() => {
     me().then(setSelf).catch(() => {});
     // only invite the parent to verify if a code can actually be delivered
-    api<{ phone: boolean }>("/api/verify/availability")
-      .then((a) => setSmsAvailable(a.phone))
-      .catch(() => setSmsAvailable(false));
+    api<{ phone: boolean; online_payments: boolean }>("/api/verify/availability")
+      .then((a) => { setSmsAvailable(a.phone); setPayAvailable(a.online_payments); })
+      .catch(() => { setSmsAvailable(false); setPayAvailable(false); });
   }, []);
 
   async function requestVerifyCode() {
@@ -302,7 +303,7 @@ export default function WardsPage() {
                         : "bg-sanction/10 text-sanction"}`}>
                       {fee.status.replace("_", " ")}
                     </span>
-                    {fee.balance > 0 && (
+                    {fee.balance > 0 && payAvailable && fee.can_pay_online && (
                       <button onClick={() => payOnline(fee)} disabled={busy !== null}
                               className="rounded-md bg-ink text-white px-3 py-1.5 text-xs font-medium hover:bg-ink-soft disabled:opacity-50">
                         {busy === `pay-${fee.student_id}` ? "Starting…" : "Pay online"}

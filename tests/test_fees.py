@@ -154,3 +154,67 @@ async def test_debt_gate_blocks_parent_until_paid(ctx):
                               headers=ph, params={"term_id": ids["term_id"]})
     assert opened.status_code == 200
     assert opened.json()["student"]["name"] == "Chinedu Eze"
+
+
+async def test_end_of_day_reconciliation_names_every_naira(ctx):
+    """Both the admin and the bursar can record payments — reconciliation makes
+    the drawer count against a named, referenced list so cash cannot drift."""
+    from datetime import date
+    client, ids = ctx
+    ah = await headers(client, "admin@gss-ikeja.ng", "admin123")
+    today = str(date.today())
+
+    cat = (await client.post("/api/fees/categories", headers=ah,
+           json={"name": "School Fees"})).json()
+    from app.models.academics import ClassArm
+    async with ids["session_factory"]() as db:
+        arm = await db.get(ClassArm, ids["arm_id"])
+        class_id = arm.class_id
+    await client.post("/api/fees/structures", headers=ah, json={
+        "class_id": class_id, "term_id": ids["term_id"],
+        "category_id": cat["id"], "amount": 20000})
+    await client.post("/api/fees/invoices/generate", headers=ah,
+                      json={"arm_id": ids["arm_id"], "term_id": ids["term_id"]})
+    invoices = (await client.get("/api/fees/invoices", headers=ah,
+                params={"term_id": ids["term_id"]})).json()
+
+    # the ADMIN records one cash payment; the BURSAR records two
+    await client.post("/api/fees/payments", headers=ah, json={
+        "invoice_id": invoices[0]["id"], "amount": 20000, "method": "cash",
+        "reference": "TELLER-001", "paid_at": today})
+    # the fixture seeds no bursar — create one for this test
+    await client.post("/api/users", headers=ah, json={
+        "email": "bursar@gss-ikeja.ng", "role": "bursar",
+        "first_name": "Chika", "last_name": "Nwosu", "password": "bursar123"})
+    bh = await headers(client, "bursar@gss-ikeja.ng", "bursar123")
+    await client.post("/api/fees/payments", headers=bh, json={
+        "invoice_id": invoices[1]["id"], "amount": 10000, "method": "cash",
+        "reference": "TELLER-002", "paid_at": today})
+    await client.post("/api/fees/payments", headers=bh, json={
+        "invoice_id": invoices[2]["id"], "amount": 20000, "method": "transfer",
+        "reference": "TRF-903311", "paid_at": today})
+
+    recon = (await client.get("/api/fees/reconciliation", headers=bh,
+             params={"date": today})).json()
+
+    assert recon["count"] == 3 and recon["grand_total"] == 50000
+
+    cash = next(m for m in recon["by_method"] if m["method"] == "cash")
+    assert cash["count"] == 2 and cash["total"] == 30000
+
+    # each person answers for their own lines — this is the anti-discrepancy core
+    admin_cash = next(r for r in recon["by_recorder"]
+                      if r["method"] == "cash" and "Amaka" in r["recorded_by"])
+    bursar_cash = next(r for r in recon["by_recorder"]
+                       if r["method"] == "cash" and "Amaka" not in r["recorded_by"])
+    assert admin_cash["total"] == 20000
+    assert bursar_cash["total"] == 10000
+
+    # every row carries its teller reference
+    refs = {p["reference"] for p in recon["payments"]}
+    assert refs == {"TELLER-001", "TELLER-002", "TRF-903311"}
+
+    # a teacher may not see the money at all
+    th = await headers(client, "teacher@gss-ikeja.ng", "teach123")
+    assert (await client.get("/api/fees/reconciliation", headers=th,
+            params={"date": today})).status_code == 403

@@ -220,6 +220,18 @@ async def offboard_user(
             a.deleted_at = now
         detail["assignments_closed"] = {"old": len(assignments), "new": 0}
 
+        # their timetable slots stay on the grid — the class still has that
+        # lesson to attend — but the teacher becomes vacant for reassignment
+        from app.models.timetable import Lesson
+        lessons = (await db.execute(select(Lesson).where(
+            Lesson.school_id == school_id,
+            Lesson.teacher_id == user.id,
+            Lesson.deleted_at.is_(None)))).scalars().all()
+        for lsn in lessons:
+            lsn.teacher_id = None
+            lsn.updated_by = admin.id
+        detail["timetable_slots_vacated"] = {"old": len(lessons), "new": 0}
+
     # a parent's view of their wards ends; the students are untouched
     if user.role == Role.PARENT:
         links = (await db.execute(select(Guardian).where(

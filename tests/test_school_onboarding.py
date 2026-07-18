@@ -39,7 +39,7 @@ async def test_super_admin_onboards_a_school_in_one_call(ctx):
     names = {s["name"] for s in estate}
     assert "Pilot College Yola" in names
     yola = next(s for s in estate if s["slug"] == "pilot-college-yola")
-    assert yola["students"] == 0 and yola["users"] == 1
+    assert yola["students"] == 0 and yola["admins"] == 1 and yola["active_accounts"] == 1
 
 
 async def test_duplicate_slug_is_refused(ctx):
@@ -91,3 +91,44 @@ async def test_school_admins_cannot_touch_the_platform_console(ctx):
         "name": "Rogue", "slug": "rogue", "admin_email": "r@r.ng",
         "admin_password": "start1234", "admin_first_name": "R",
         "admin_last_name": "R"})).status_code == 403
+
+
+async def test_offboarding_a_school_blocks_every_account_but_keeps_records(ctx):
+    client, ids = ctx
+    sh = await _super(client, ids)
+    await client.post("/api/schools", headers=sh, json={
+        "name": "Leaving College", "slug": "leaving-college",
+        "admin_email": "admin@leaving.ng", "admin_password": "start1234",
+        "admin_first_name": "L", "admin_last_name": "C"})
+
+    # the school works, then decides not to continue after the pilot
+    ah = await headers(client, "admin@leaving.ng", "start1234")
+    await client.post("/api/students", headers=ah, json={
+        "admission_number": "LV/26/001", "first_name": "Kept",
+        "last_name": "Record", "gender": "male"})
+
+    sid = next(s["id"] for s in (await client.get("/api/schools", headers=sh)).json()
+               if s["slug"] == "leaving-college")
+    r = (await client.delete(f"/api/schools/{sid}", headers=sh)).json()
+    assert r["offboarded"] is True and r["accounts_blocked"] >= 1
+
+    # every sign-in is now refused
+    assert (await client.post("/api/auth/login", data={
+        "username": "admin@leaving.ng", "password": "start1234"})).status_code in (401, 403)
+
+    # gone from the console list; a second offboard is a clean 404
+    assert "leaving-college" not in [s["slug"] for s in
+        (await client.get("/api/schools", headers=sh)).json()]
+    assert (await client.delete(f"/api/schools/{sid}", headers=sh)).status_code == 404
+
+
+async def test_console_breaks_engagement_down_by_role(ctx):
+    client, ids = ctx
+    sh = await _super(client, ids)
+    estate = (await client.get("/api/schools", headers=sh)).json()
+    seeded = next(s for s in estate if s["slug"] == "gss-ikeja")
+    # the test fixture school: 3 students, 1 admin, 1 teacher, 1 bursar
+    assert seeded["students"] == 3
+    assert seeded["admins"] == 1 and seeded["teachers"] == 1
+    # the console reports each role count; the fixture seeds no bursar/parent
+    assert "bursars" in seeded and "parents" in seeded

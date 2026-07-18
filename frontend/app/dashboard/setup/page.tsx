@@ -16,6 +16,7 @@ type SchoolSettings = {
   name: string; address: string | null; state: string | null;
   primary_color: string; principal_name: string | null;
   withhold_results_on_debt: boolean;
+  online_payments_enabled: boolean;
   has_logo: boolean; has_signature: boolean; has_stamp: boolean;
   logo_url: string | null;
 };
@@ -170,6 +171,21 @@ export default function SetupPage() {
       await load();
     } catch (e) {
       setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not save the date." });
+    } finally { setBusy(null); }
+  }
+
+  async function toggleOnlinePayments(next: boolean) {
+    setBusy("onlinepay"); setNotice(null);
+    try {
+      await api("/api/schools/me", {
+        method: "PATCH", body: JSON.stringify({ online_payments_enabled: next }),
+      });
+      toast.ok(next
+        ? "Online payments switched ON — parents now see a Pay online button."
+        : "Online payments switched OFF — parents are asked to pay at the bursary.");
+      await load();
+    } catch (e) {
+      toast.err(e instanceof ApiError ? e.message : "Could not change the setting.");
     } finally { setBusy(null); }
   }
 
@@ -362,7 +378,15 @@ export default function SetupPage() {
           <p className="text-sm font-medium mb-2">Integrations</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {[
-              { label: "Online payments (Paystack)", ...integrations.online_payments },
+              {
+                label: "Online payments (Paystack)",
+                live: Boolean(integrations.online_payments.live && school?.online_payments_enabled),
+                message: !integrations.online_payments.live
+                  ? integrations.online_payments.message
+                  : school?.online_payments_enabled
+                    ? "Parents can pay online with Paystack."
+                    : "The payment gateway is configured, but online payment is switched OFF for this school — parents are asked to pay at the bursary.",
+              },
               { label: "SMS to parents (Termii)", ...integrations.sms },
             ].map((i) => (
               <div key={i.label} className="rounded-md border border-line bg-paper p-3">
@@ -377,6 +401,22 @@ export default function SetupPage() {
                 <p className="text-xs text-ink-soft mt-1">{i.message}</p>
               </div>
             ))}
+          </div>
+
+          {/* the school decides whether parents may pay online */}
+          <div className="mt-3 flex items-start gap-3 rounded-md border border-line bg-paper p-3">
+            <input type="checkbox" id="onlinepay"
+                   checked={school?.online_payments_enabled ?? false}
+                   disabled={busy !== null}
+                   onChange={(e) => toggleOnlinePayments(e.target.checked)}
+                   className="mt-0.5 h-4 w-4" />
+            <label htmlFor="onlinepay" className="text-xs">
+              <span className="font-medium block text-sm">Allow parents to pay online</span>
+              <span className="text-ink-soft">
+                Off by default. Leave it off until the school is ready for online
+                collections — parents then see no Pay online button at all.
+              </span>
+            </label>
           </div>
 
           {/* verify SMS actually works, before term-time */}

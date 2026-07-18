@@ -36,6 +36,10 @@ def _signed(body: dict) -> tuple[bytes, str]:
 async def test_init_returns_503_when_gateway_not_configured(ctx):
     client, ids = ctx
     ah, inv = await _billed_invoice(client, ids)
+    # the school must have online payment switched ON for the request to reach
+    # the gateway check at all — otherwise it is (correctly) refused earlier
+    await client.patch("/api/schools/me", headers=ah,
+                       json={"online_payments_enabled": True})
     # force the unconfigured state — a developer's .env may set the key to ''
     # (falsy, still unconfigured) or even a real value; the test must not
     # depend on the ambient environment.

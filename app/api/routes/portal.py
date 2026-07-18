@@ -45,6 +45,10 @@ async def my_wards(db: DbDep, user: Annotated[User, PortalRoles]):
     classes = {c.id: c.name for c in (await db.execute(select(SchoolClass).where(
         SchoolClass.school_id == school_id))).scalars().all()}
 
+    from app.models.school import School as _School
+    _sch = await db.get(_School, school_id)
+    can_pay_online = bool(_sch and _sch.online_payments_enabled)
+
     out = []
     for st in students:
         arm = arms.get(st.current_arm_id) if st.current_arm_id else None
@@ -64,6 +68,12 @@ async def my_fees(db: DbDep, user: Annotated[User, PortalRoles],
     """Read-only invoice position for each of the caller's wards this term."""
     school_id = tenant_scope(user)
     students = await _my_students(db, user, school_id)
+
+    # the Pay online button only exists when the school has switched it on
+    from app.models.school import School as _School
+    _sch = await db.get(_School, school_id)
+    can_pay_online = bool(_sch and _sch.online_payments_enabled)
+
     out = []
     for st in students:
         inv = (await db.execute(select(Invoice).where(
@@ -74,5 +84,6 @@ async def my_fees(db: DbDep, user: Annotated[User, PortalRoles],
         if inv:
             view = await invoice_view(db, inv)
             view["student_id"] = st.id
+            view["can_pay_online"] = can_pay_online
             out.append(view)
     return out

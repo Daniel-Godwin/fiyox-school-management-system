@@ -5,7 +5,9 @@ import { api, ApiError } from "@/lib/api";
 
 type SchoolRow = {
   id: string; name: string; slug: string; state: string | null;
-  phone: string | null; students: number; users: number;
+  phone: string | null; students: number;
+  admins: number; bursars: number; teachers: number; parents: number;
+  active_accounts: number;
   created_at: string | null;
 };
 
@@ -42,6 +44,27 @@ export default function SchoolsConsole() {
     crypto.getRandomValues(rnd);
     for (const n of rnd) out += chars[n % chars.length];
     setForm((f) => ({ ...f, admin_password: out }));
+  }
+
+  async function offboardSchool(s: SchoolRow) {
+    const typed = prompt(
+      `Offboard ${s.name}?\n\nEvery account in this school (${s.active_accounts} active) stops signing in immediately. Records are kept, not destroyed, and support can restore the school if it returns.\n\nThe school should download its full data export FIRST.\n\nType the school's name to confirm:`
+    );
+    if (typed === null) return;
+    if (typed.trim().toLowerCase() !== s.name.trim().toLowerCase()) {
+      setNotice({ kind: "err", text: "The name did not match — nothing was done." });
+      return;
+    }
+    setBusy(true); setNotice(null);
+    try {
+      const r = await api<{ accounts_blocked: number; note: string }>(
+        `/api/schools/${s.id}`, { method: "DELETE" });
+      setNotice({ kind: "ok",
+        text: `${s.name} offboarded — ${r.accounts_blocked} account(s) blocked. ${r.note}` });
+      await load();
+    } catch (e) {
+      setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not offboard the school." });
+    } finally { setBusy(false); }
   }
 
   async function createSchool() {
@@ -173,14 +196,17 @@ export default function SchoolsConsole() {
         )}
         {schools && schools.length > 0 && (
           <div className="overflow-x-auto rounded-lg border border-line bg-card">
-            <table className="min-w-[560px] w-full text-sm">
+            <table className="min-w-[760px] w-full text-sm">
               <thead>
                 <tr className="bg-ink text-white text-left">
                   <th className="px-3 py-2 font-medium">School</th>
-                  <th className="px-3 py-2 font-medium">State</th>
                   <th className="px-3 py-2 font-medium text-right">Students</th>
-                  <th className="px-3 py-2 font-medium text-right">Accounts</th>
+                  <th className="px-3 py-2 font-medium text-right">Teachers</th>
+                  <th className="px-3 py-2 font-medium text-right">Parents</th>
+                  <th className="px-3 py-2 font-medium text-right">Admins</th>
+                  <th className="px-3 py-2 font-medium text-right">Bursars</th>
                   <th className="px-3 py-2 font-medium">Onboarded</th>
+                  <th className="px-3 py-2"></th>
                 </tr>
               </thead>
               <tbody>
@@ -188,12 +214,22 @@ export default function SchoolsConsole() {
                   <tr key={s.id} className={i % 2 ? "bg-paper/50" : ""}>
                     <td className="px-3 py-2">
                       <div className="font-medium">{s.name}</div>
-                      <div className="text-xs text-ink-soft font-mono">{s.slug}</div>
+                      <div className="text-xs text-ink-soft font-mono">
+                        {s.slug}{s.state ? ` · ${s.state}` : ""}
+                      </div>
                     </td>
-                    <td className="px-3 py-2">{s.state ?? "—"}</td>
                     <td className="px-3 py-2 text-right tabular">{s.students}</td>
-                    <td className="px-3 py-2 text-right tabular">{s.users}</td>
+                    <td className="px-3 py-2 text-right tabular">{s.teachers}</td>
+                    <td className="px-3 py-2 text-right tabular">{s.parents}</td>
+                    <td className="px-3 py-2 text-right tabular">{s.admins}</td>
+                    <td className="px-3 py-2 text-right tabular">{s.bursars}</td>
                     <td className="px-3 py-2 text-xs text-ink-soft">{s.created_at ?? "—"}</td>
+                    <td className="px-3 py-2 text-right">
+                      <button onClick={() => offboardSchool(s)} disabled={busy}
+                              className="text-sanction underline underline-offset-2 hover:opacity-70 disabled:opacity-50 text-xs">
+                        Offboard
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

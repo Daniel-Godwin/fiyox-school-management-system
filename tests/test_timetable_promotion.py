@@ -182,3 +182,81 @@ async def test_final_year_graduates_rather_than_being_promoted(ctx):
     students = (await client.get("/api/students", headers=ah)).json()
     assert all(s["is_active"] is False for s in students)
     assert len(students) == 3
+
+
+# ------------------------------------------------ living-timetable uniqueness
+
+async def test_a_removed_lesson_frees_its_slot(ctx):
+    """The bug: removing a lesson left a soft-deleted ghost that still occupied
+    the database uniqueness rule, so re-placing anything in that slot 500'd."""
+    client, ids = ctx
+    ah = await headers(client, "admin@gss-ikeja.ng", "admin123")
+    p1, _, _ = await _periods(client, ah)
+    english = (await client.post("/api/academics/subjects", headers=ah,
+               json={"name": "English Language"})).json()["id"]
+
+    first = (await client.post("/api/timetable/lessons", headers=ah, json={
+        "arm_id": ids["arm_id"], "day": "monday", "period_id": p1["id"],
+        "subject_id": ids["subject_id"]})).json()
+    await client.delete(f"/api/timetable/lessons/{first['id']}", headers=ah)
+
+    # the slot is free again — a different subject can take it
+    again = await client.post("/api/timetable/lessons", headers=ah, json={
+        "arm_id": ids["arm_id"], "day": "monday", "period_id": p1["id"],
+        "subject_id": english})
+    assert again.status_code == 201
+
+    # and only the new lesson shows on the grid
+    grid = (await client.get("/api/timetable", headers=ah,
+            params={"arm_id": ids["arm_id"]})).json()
+    monday = [l for l in grid["lessons"]
+              if l["day"] == "monday" and l["period_id"] == p1["id"]]
+    assert [l["subject_name"] for l in monday] == ["English Language"]
+
+
+async def test_a_deleted_period_frees_its_row_number(ctx):
+    client, ids = ctx
+    ah = await headers(client, "admin@gss-ikeja.ng", "admin123")
+    p = (await client.post("/api/timetable/periods", headers=ah, json={
+        "name": "Period 1", "sequence": 1})).json()
+    await client.delete(f"/api/timetable/periods/{p['id']}", headers=ah)
+
+    again = await client.post("/api/timetable/periods", headers=ah, json={
+        "name": "Period 1 (new times)", "sequence": 1,
+        "start_time": "08:15", "end_time": "08:55"})
+    assert again.status_code == 201
+
+
+async def test_offboarding_a_teacher_vacates_their_timetable_slots(ctx):
+    """A teacher who leaves must disappear from the printed timetable; the
+    lesson itself stays — the class still has Maths to attend — but vacant."""
+    client, ids = ctx
+    ah = await headers(client, "admin@gss-ikeja.ng", "admin123")
+    p1, _, _ = await _periods(client, ah)
+
+    leaver = (await client.post("/api/users", headers=ah, json={
+        "email": "leaving@t.ng", "role": "teacher", "first_name": "Going",
+        "last_name": "Soon", "password": "teach123"})).json()["user"]["id"]
+    await client.post("/api/timetable/lessons", headers=ah, json={
+        "arm_id": ids["arm_id"], "day": "friday", "period_id": p1["id"],
+        "subject_id": ids["subject_id"], "teacher_id": leaver})
+
+    r = (await client.delete(f"/api/users/{leaver}", headers=ah))
+    assert r.status_code == 200
+
+    grid = (await client.get("/api/timetable", headers=ah,
+            params={"arm_id": ids["arm_id"]})).json()
+    friday = next(l for l in grid["lessons"] if l["day"] == "friday")
+    assert friday["subject_name"] == "Mathematics"   # the lesson survives
+    assert friday["teacher_name"] is None            # the leaver does not
+
+    # and the vacant slot accepts a replacement teacher without complaint
+    # (the leaver no longer "occupies" it for clash purposes)
+    replacement = (await client.post("/api/users", headers=ah, json={
+        "email": "newhire@t.ng", "role": "teacher", "first_name": "New",
+        "last_name": "Hire", "password": "teach123"})).json()["user"]["id"]
+    await client.delete(f"/api/timetable/lessons/{friday['id']}", headers=ah)
+    refill = await client.post("/api/timetable/lessons", headers=ah, json={
+        "arm_id": ids["arm_id"], "day": "friday", "period_id": p1["id"],
+        "subject_id": ids["subject_id"], "teacher_id": replacement})
+    assert refill.status_code == 201

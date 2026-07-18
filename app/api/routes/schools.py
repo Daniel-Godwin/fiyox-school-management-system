@@ -54,6 +54,7 @@ class SchoolSettingsIn(BaseModel):
     phone: str | None = None
     primary_color: str | None = None      # hex, brands the report card & receipt
     withhold_results_on_debt: bool | None = None
+    online_payments_enabled: bool | None = None
 
 
 @router.get("/me", tags=["schools"])
@@ -72,6 +73,7 @@ async def my_school(
         "primary_color": school.primary_color,
         "principal_name": school.principal_name,
         "withhold_results_on_debt": school.withhold_results_on_debt,
+        "online_payments_enabled": school.online_payments_enabled,
         "has_logo": bool(school.logo_url),
         "has_signature": bool(school.signature_url),
         "has_stamp": bool(school.stamp_url),
@@ -110,6 +112,7 @@ async def update_my_school(
         "primary_color": school.primary_color,
         "principal_name": school.principal_name,
         "withhold_results_on_debt": school.withhold_results_on_debt,
+        "online_payments_enabled": school.online_payments_enabled,
         "updated": list(changes.keys()),
     }
 
@@ -181,13 +184,71 @@ async def list_schools(
         students = (await db.execute(select(Student.id).where(
             Student.school_id == s.id,
             Student.deleted_at.is_(None)))).scalars().all()
-        users = (await db.execute(select(User.id).where(
+        users = (await db.execute(select(User).where(
             User.school_id == s.id,
             User.deleted_at.is_(None)))).scalars().all()
+        roles = {"school_admin": 0, "bursar": 0, "teacher": 0,
+                 "parent": 0, "student": 0}
+        active = 0
+        for u in users:
+            r = str(getattr(u.role, "value", u.role))
+            if r in roles:
+                roles[r] += 1
+            if u.is_active:
+                active += 1
         out.append({
             "id": s.id, "name": s.name, "slug": s.slug,
             "state": s.state, "phone": s.phone,
-            "students": len(students), "users": len(users),
+            "students": len(students),
+            "admins": roles["school_admin"], "bursars": roles["bursar"],
+            "teachers": roles["teacher"], "parents": roles["parent"],
+            "active_accounts": active,
             "created_at": str(s.created_at)[:10] if s.created_at else None,
         })
     return out
+
+
+@router.delete("/{school_id}", tags=["schools"])
+async def offboard_school(
+    school_id: str, db: DbDep,
+    owner: Annotated[User, Depends(require_roles(Role.SUPER_ADMIN))],
+):
+    """A school leaves the platform — after a pilot, or by choice.
+
+    The school is closed and every one of its accounts stops signing in,
+    immediately. Nothing is destroyed: the tenant's records stay in the
+    database (results, payments, audit trail), so a returning school can be
+    reactivated by support, and disputes years later can still be answered.
+    The school should download its full export BEFORE this is done.
+    """
+    from datetime import datetime, timezone
+    from app.services.audit import record_audit
+
+    school = await db.get(School, school_id)
+    if not school or school.deleted_at:
+        raise HTTPException(status_code=404, detail="School not found")
+
+    users = (await db.execute(select(User).where(
+        User.school_id == school_id,
+        User.deleted_at.is_(None)))).scalars().all()
+
+    now = datetime.now(timezone.utc)
+    blocked = 0
+    for u in users:
+        if u.is_active:
+            u.is_active = False
+            blocked += 1
+    school.deleted_at = now
+
+    await record_audit(db, school_id=school_id, user_id=owner.id,
+                       action="offboard", table_name="schools",
+                       record_id=school_id,
+                       changes={"school": {"old": school.name, "new": None},
+                                "accounts_blocked": {"old": blocked, "new": 0}})
+    await db.commit()
+    return {"offboarded": True, "school": school.name,
+            "accounts_blocked": blocked,
+            "note": ("All sign-ins for this school are now blocked. Records are "
+                     "retained, not destroyed — the school can be restored by "
+                     "support if it returns.")}
+

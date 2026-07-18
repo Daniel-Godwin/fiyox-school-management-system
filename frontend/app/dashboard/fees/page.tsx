@@ -11,6 +11,17 @@ type Summary = {
   collection_rate: number; by_status: Record<string, number>;
   debtors: { student_id: string; invoice_number: string; balance: number }[];
 };
+type ReconRow = {
+  reference: string; student: string; admission_number: string;
+  invoice_number: string; amount: number; method: string; recorded_by: string;
+  payment_id: string;
+};
+type Recon = {
+  date: string; payments: ReconRow[];
+  by_method: { method: string; count: number; total: number }[];
+  by_recorder: { recorded_by: string; method: string; count: number; total: number }[];
+  grand_total: number; count: number;
+};
 type Invoice = {
   id: string; student_id: string; invoice_number: string; amount: number;
   discount: number; paid: number; balance: number; status: string;
@@ -26,6 +37,10 @@ const METHODS = ["cash", "transfer", "pos", "paystack", "flutterwave"];
 
 export default function FeesPage() {
   const [terms, setTerms] = useState<Term[]>([]);
+  const [reconDate, setReconDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [recon, setRecon] = useState<Recon | null>(null);
+  const [reconBusy, setReconBusy] = useState(false);
+
   const [arms, setArms] = useState<Arm[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [termId, setTermId] = useState("");
@@ -280,6 +295,15 @@ export default function FeesPage() {
     { label: "Outstanding", value: ngn(summary.outstanding) },
     { label: "Collection rate", value: `${summary.collection_rate}%` },
   ];
+
+  async function loadRecon() {
+    setReconBusy(true);
+    try {
+      setRecon(await api<Recon>(`/api/fees/reconciliation?date=${reconDate}`));
+    } catch {
+      setRecon(null);
+    } finally { setReconBusy(false); }
+  }
 
   return (
     <div className="space-y-5">
@@ -595,6 +619,103 @@ export default function FeesPage() {
           </table>
         </div>
       )}
+      {/* end-of-day reconciliation: paper vs system */}
+      <section className="rounded-lg border border-line bg-card p-4 space-y-3">
+        <div>
+          <h2 className="text-sm font-medium">End-of-day reconciliation</h2>
+          <p className="text-xs text-ink-soft">
+            Count the cash drawer against this list. Every payment shows its
+            reference (teller no.), who recorded it, and the method — so the
+            paper ledger and Fiyox must agree line by line, not just in total.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="block">
+            <span className="block text-xs text-ink-soft mb-1">Day</span>
+            <input type="date" value={reconDate}
+                   onChange={(e) => setReconDate(e.target.value)}
+                   className="rounded border border-line px-2 py-1.5 text-sm bg-white" />
+          </label>
+          <button onClick={loadRecon} disabled={reconBusy}
+                  className="rounded-md border border-ink text-ink px-4 py-2 text-sm font-medium hover:bg-ink hover:text-white disabled:opacity-40">
+            {reconBusy ? "Loading…" : "Show the day"}
+          </button>
+          {recon && (
+            <span className="text-sm text-ink-soft pb-2">
+              {recon.count} payment{recon.count === 1 ? "" : "s"} ·
+              &nbsp;total <b className="tabular">₦{recon.grand_total.toLocaleString()}</b>
+            </span>
+          )}
+        </div>
+
+        {recon && recon.count === 0 && (
+          <p className="text-sm text-ink-soft">No payments recorded on {recon.date}.</p>
+        )}
+
+        {recon && recon.count > 0 && (
+          <>
+            <div className="flex flex-wrap gap-2">
+              {recon.by_method.map((m) => (
+                <span key={m.method}
+                      className="rounded-full border border-line bg-paper px-3 py-1 text-xs">
+                  <b className="uppercase">{m.method}</b> · {m.count} ·
+                  &nbsp;<span className="tabular">₦{m.total.toLocaleString()}</span>
+                </span>
+              ))}
+            </div>
+
+            <div className="overflow-x-auto rounded-md border border-line">
+              <table className="min-w-[640px] w-full text-sm">
+                <thead>
+                  <tr className="bg-paper text-left text-xs uppercase tracking-wide text-ink-soft">
+                    <th className="px-3 py-2">Ref / teller no.</th>
+                    <th className="px-3 py-2">Student</th>
+                    <th className="px-3 py-2">Invoice</th>
+                    <th className="px-3 py-2 text-right">Amount</th>
+                    <th className="px-3 py-2">Method</th>
+                    <th className="px-3 py-2">Recorded by</th>
+                    <th className="px-3 py-2"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recon.payments.map((p, i) => (
+                    <tr key={p.payment_id} className={i % 2 ? "bg-paper/50" : ""}>
+                      <td className="px-3 py-2 font-mono text-xs">{p.reference}</td>
+                      <td className="px-3 py-2">{p.student}
+                        <span className="ml-1 text-xs text-ink-soft">{p.admission_number}</span>
+                      </td>
+                      <td className="px-3 py-2 text-xs">{p.invoice_number}</td>
+                      <td className="px-3 py-2 text-right tabular">₦{p.amount.toLocaleString()}</td>
+                      <td className="px-3 py-2 uppercase text-xs">{p.method}</td>
+                      <td className="px-3 py-2">{p.recorded_by}</td>
+                      <td className="px-3 py-2 text-right">
+                        <button onClick={() => openPdf(`/api/fees/payments/${p.payment_id}/receipt`)}
+                                className="text-xs text-ink underline underline-offset-2 hover:text-ink-soft">
+                          Receipt
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div>
+              <p className="text-xs font-medium text-ink-soft mb-1">Per person, per method — each signs for their own line:</p>
+              <div className="flex flex-wrap gap-2">
+                {recon.by_recorder.map((r, i) => (
+                  <span key={i}
+                        className="rounded-md border border-line bg-white px-3 py-1.5 text-xs">
+                    <b>{r.recorded_by}</b> · <span className="uppercase">{r.method}</span> ·
+                    {" "}{r.count} payment{r.count === 1 ? "" : "s"} ·
+                    &nbsp;<b className="tabular">₦{r.total.toLocaleString()}</b>
+                  </span>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+      </section>
     </div>
   );
 }

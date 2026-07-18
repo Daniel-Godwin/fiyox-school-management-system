@@ -16,6 +16,7 @@ from datetime import time
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -84,7 +85,12 @@ async def create_period(payload: PeriodIn, db: DbDep,
                end_time=_parse(payload.end_time),
                is_break=payload.is_break, created_by=user.id)
     db.add(p)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409,
+                            detail=f"Row {payload.sequence} was just taken — refresh and try again")
     await db.refresh(p)
     return {"id": p.id, "name": p.name, "sequence": p.sequence,
             "start_time": _fmt(p.start_time), "end_time": _fmt(p.end_time),
@@ -191,7 +197,12 @@ async def schedule_lesson(payload: LessonIn, request: Request, db: DbDep,
                                 "slot": {"old": None,
                                          "new": f"{payload.day.value} {period.name}"}},
                        ip_address=request.client.host if request.client else None)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409,
+                            detail="That slot was just filled by someone else — refresh the grid")
     return {"id": lsn.id}
 
 
