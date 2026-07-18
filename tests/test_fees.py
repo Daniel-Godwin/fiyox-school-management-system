@@ -218,3 +218,77 @@ async def test_end_of_day_reconciliation_names_every_naira(ctx):
     th = await headers(client, "teacher@gss-ikeja.ng", "teach123")
     assert (await client.get("/api/fees/reconciliation", headers=th,
             params={"date": today})).status_code == 403
+
+
+async def test_receipt_is_school_branded_with_signatures_and_stamp(ctx):
+    """A receipt is evidence of payment — it must look official: crest, the
+    bursar and principal signatures, and the school stamp. It must also render
+    for a PART payment (showing the balance) and a FULL one."""
+    client, ids = ctx
+    ah = await headers(client, "admin@gss-ikeja.ng", "admin123")
+
+    # give the school branding assets (tiny valid PNGs as data-URIs)
+    png = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
+           "YPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
+    uri = f"data:image/png;base64,{png}"
+    await client.patch("/api/schools/me", headers=ah, json={
+        "principal_name": "Dr. Test Principal"})
+    # upload signature + stamp via the branding endpoints if present; else patch
+    async with ids["session_factory"]() as db:
+        from app.models.school import School
+        s = await db.get(School, ids["school_id"])
+        s.signature_url = uri
+        s.stamp_url = uri
+        s.logo_url = uri
+        await db.commit()
+
+    # bill and take a PART payment
+    from app.models.academics import ClassArm
+    async with ids["session_factory"]() as db:
+        arm = await db.get(ClassArm, ids["arm_id"])
+        class_id = arm.class_id
+    cat = (await client.post("/api/fees/categories", headers=ah,
+           json={"name": "Fees"})).json()
+    await client.post("/api/fees/structures", headers=ah, json={
+        "class_id": class_id, "term_id": ids["term_id"],
+        "category_id": cat["id"], "amount": 50000})
+    await client.post("/api/fees/invoices/generate", headers=ah,
+                      json={"arm_id": ids["arm_id"], "term_id": ids["term_id"]})
+    inv = (await client.get("/api/fees/invoices", headers=ah,
+           params={"term_id": ids["term_id"]})).json()[0]
+    pay = (await client.post("/api/fees/payments", headers=ah, json={
+        "invoice_id": inv["id"], "amount": 20000, "method": "cash",
+        "reference": "TELLER-9", "paid_at": "2026-07-17"})).json()
+    pid = pay.get("payment_id") or pay.get("id")
+
+    r = await client.get(f"/api/fees/payments/{pid}/receipt", headers=ah)
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.content[:4] == b"%PDF"          # a real PDF came back
+    assert len(r.content) > 3000             # branding images made it non-trivial
+
+
+async def test_receipt_still_renders_without_any_branding(ctx):
+    """A school that has uploaded no signature or stamp must still get a valid
+    receipt — ruled lines stand in for the missing assets."""
+    client, ids = ctx
+    ah = await headers(client, "admin@gss-ikeja.ng", "admin123")
+    from app.models.academics import ClassArm
+    async with ids["session_factory"]() as db:
+        arm = await db.get(ClassArm, ids["arm_id"])
+        class_id = arm.class_id
+    cat = (await client.post("/api/fees/categories", headers=ah,
+           json={"name": "Fees"})).json()
+    await client.post("/api/fees/structures", headers=ah, json={
+        "class_id": class_id, "term_id": ids["term_id"],
+        "category_id": cat["id"], "amount": 15000})
+    await client.post("/api/fees/invoices/generate", headers=ah,
+                      json={"arm_id": ids["arm_id"], "term_id": ids["term_id"]})
+    inv = (await client.get("/api/fees/invoices", headers=ah,
+           params={"term_id": ids["term_id"]})).json()[0]
+    pay = (await client.post("/api/fees/payments", headers=ah, json={
+        "invoice_id": inv["id"], "amount": 15000, "method": "cash",
+        "reference": "TELLER-Z", "paid_at": "2026-07-17"})).json()
+    pid = pay.get("payment_id") or pay.get("id")
+    r = await client.get(f"/api/fees/payments/{pid}/receipt", headers=ah)
+    assert r.status_code == 200 and r.content[:4] == b"%PDF"

@@ -155,7 +155,11 @@ async def payment_receipt(
     inv_view = await invoice_view(db, inv)
     pdf = build_receipt_pdf({
         "school": {"name": school.name, "address": school.address,
-                   "state": school.state, "color": school.primary_color},
+                   "state": school.state, "color": school.primary_color,
+                   "logo_url": school.logo_url,
+                   "signature_url": school.signature_url,
+                   "stamp_url": school.stamp_url,
+                   "principal_name": school.principal_name},
         "receipt_number": f"RCP-{pay.reference}",
         "student_name": f"{student.first_name} {student.last_name}",
         "admission_number": student.admission_number,
