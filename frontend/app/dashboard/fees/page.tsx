@@ -16,6 +16,10 @@ type ReconRow = {
   invoice_number: string; amount: number; method: string; recorded_by: string;
   payment_id: string;
 };
+type PaymentRow = {
+  payment_id: string; reference: string; receipt_number: string;
+  amount: number; method: string; paid_at: string | null; recorded_by: string;
+};
 type Recon = {
   date: string; payments: ReconRow[];
   by_method: { method: string; count: number; total: number }[];
@@ -51,6 +55,10 @@ export default function FeesPage() {
   const [payOpen, setPayOpen] = useState<string | null>(null);      // invoice id
   const [pay, setPay] = useState<PayForm>({ amount: "", method: "cash", reference: "" });
   const [lastReceipt, setLastReceipt] = useState<Record<string, string>>({}); // invoice -> payment id
+  // receipts picker: an invoice may have several payments (instalments), and
+  // each one is real evidence deserving its own printable receipt
+  const [receiptsFor, setReceiptsFor] = useState<Invoice | null>(null);
+  const [receiptList, setReceiptList] = useState<PaymentRow[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
@@ -278,6 +286,39 @@ export default function FeesPage() {
     } catch (e) {
       setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Payment failed." });
     } finally { setBusy(null); }
+  }
+
+  async function printAllReceipts() {
+    if (!recon || recon.payments.length === 0) return;
+    // Browsers block a burst of pop-ups, so open them one at a time with a
+    // short gap — enough for the day's takings without tripping the blocker.
+    setNotice({
+      kind: "ok",
+      text: `Opening ${recon.payments.length} receipt${recon.payments.length === 1 ? "" : "s"} — allow pop-ups if your browser asks.`,
+    });
+    for (const p of recon.payments) {
+      try { await openPdf(`/api/fees/payments/${p.payment_id}/receipt`); }
+      catch { /* keep going: one failure must not stop the batch */ }
+      await new Promise((r) => setTimeout(r, 400));
+    }
+  }
+
+  async function openReceipts(inv: Invoice) {
+    setReceiptsFor(inv);
+    setReceiptList(null);
+    setNotice(null);
+    try {
+      const rows = await api<PaymentRow[]>(`/api/fees/invoices/${inv.id}/payments`);
+      setReceiptList(rows);
+      // exactly one payment: skip the picker and open it straight away
+      if (rows.length === 1) {
+        await openPdf(`/api/fees/payments/${rows[0].payment_id}/receipt`);
+        setReceiptsFor(null);
+      }
+    } catch (e) {
+      setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not load the receipts." });
+      setReceiptsFor(null);
+    }
   }
 
   async function receipt(invoiceId: string) {
@@ -569,10 +610,13 @@ export default function FeesPage() {
                           Record payment
                         </button>
                       )}
-                      {lastReceipt[inv.id] && (
-                        <button onClick={() => receipt(inv.id)} disabled={busy !== null}
+                      {inv.paid > 0 && (
+                        <button onClick={() => openReceipts(inv)} disabled={busy !== null}
+                                title={inv.status === "paid"
+                                  ? "Print the receipt for this fully paid invoice"
+                                  : "Print a receipt for a part payment"}
                                 className="text-ink underline underline-offset-2 hover:text-ink-soft disabled:opacity-50">
-                          {busy === `r-${inv.id}` ? "Opening…" : "Receipt"}
+                          Receipt
                         </button>
                       )}
                     </td>
@@ -619,6 +663,52 @@ export default function FeesPage() {
           </table>
         </div>
       )}
+      {/* choose which payment's receipt to print */}
+      {receiptsFor && (
+        <section className="rounded-lg border border-brass bg-brass/10 p-4 space-y-3 max-w-2xl">
+          <div className="flex items-baseline justify-between gap-2">
+            <p className="text-sm font-medium">
+              Receipts for {nameOf(receiptsFor.student_id)}
+              <span className="ml-2 font-normal text-xs text-ink-soft">
+                {receiptsFor.invoice_number} · {receiptsFor.status.replace("_", " ")}
+              </span>
+            </p>
+            <button onClick={() => { setReceiptsFor(null); setReceiptList(null); }}
+                    className="text-xs text-ink-soft underline underline-offset-2">Close</button>
+          </div>
+
+          {receiptList === null && <p className="text-sm text-ink-soft">Loading…</p>}
+          {receiptList && receiptList.length === 0 && (
+            <p className="text-sm text-ink-soft">No payments recorded on this invoice yet.</p>
+          )}
+          {receiptList && receiptList.length > 0 && (
+            <>
+              <p className="text-xs text-ink-soft">
+                This invoice was paid in {receiptList.length} instalment
+                {receiptList.length === 1 ? "" : "s"} — each has its own receipt.
+              </p>
+              <ul className="space-y-1">
+                {receiptList.map((p) => (
+                  <li key={p.payment_id}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded border border-line bg-white px-3 py-2 text-sm">
+                    <span>
+                      <b className="tabular">{ngn(p.amount)}</b>
+                      <span className="ml-2 text-xs text-ink-soft uppercase">{p.method}</span>
+                      <span className="ml-2 text-xs text-ink-soft font-mono">{p.reference}</span>
+                      <span className="ml-2 text-xs text-ink-soft">{p.paid_at ?? ""}</span>
+                    </span>
+                    <button onClick={() => openPdf(`/api/fees/payments/${p.payment_id}/receipt`)}
+                            className="text-xs text-ink underline underline-offset-2 hover:text-ink-soft">
+                      Print receipt
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </section>
+      )}
+
       {/* end-of-day reconciliation: paper vs system */}
       <section className="rounded-lg border border-line bg-card p-4 space-y-3">
         <div>
@@ -640,6 +730,13 @@ export default function FeesPage() {
                   className="rounded-md border border-ink text-ink px-4 py-2 text-sm font-medium hover:bg-ink hover:text-white disabled:opacity-40">
             {reconBusy ? "Loading…" : "Show the day"}
           </button>
+          {recon && recon.count > 0 && (
+            <button onClick={printAllReceipts} disabled={reconBusy}
+                    title="Open a printable receipt for every payment taken on this date"
+                    className="rounded-md border border-line px-4 py-2 text-sm font-medium hover:border-ink disabled:opacity-40">
+              Print all {recon.count} receipt{recon.count === 1 ? "" : "s"}
+            </button>
+          )}
           {recon && (
             <span className="text-sm text-ink-soft pb-2">
               {recon.count} payment{recon.count === 1 ? "" : "s"} ·

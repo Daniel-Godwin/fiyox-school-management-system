@@ -596,78 +596,42 @@ async def reconciliation(
 
 
 # ---------- Daily cash reconciliation ----------
-@router.get("/reconciliation")
-async def daily_reconciliation(
-    db: DbDep, user: Annotated[User, FinanceRoles],
-    date: str = Query(..., description="YYYY-MM-DD"),
+
+
+@router.get("/invoices/{invoice_id}/payments")
+async def invoice_payments(
+    invoice_id: str, db: DbDep, user: Annotated[User, FinanceRoles],
 ):
-    """End-of-day reconciliation: every payment recorded on a given day, with
-    who recorded it, so the cash box can be counted against the system.
+    """Every payment recorded against one invoice, newest first.
 
-    Both the admin and the bursar can record payments, which is exactly why
-    ambiguity creeps in. This report removes it: totals per method, totals per
-    recorder, and the full list with teller references — if the counted cash
-    disagrees with the CASH total here, the discrepancy has a name, a time and
-    a receipt number to chase.
+    This is what makes a receipt reprintable at any time: a parent who paid in
+    three instalments can be handed evidence for any one of them, long after
+    the session in which it was recorded. Part payments and full payments are
+    treated identically — each is a real transaction deserving its own receipt.
     """
-    from datetime import date as _date
     school_id = tenant_scope(user)
-    try:
-        day = _date.fromisoformat(date)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="date must look like 2026-07-17")
+    inv = await db.get(Invoice, invoice_id)
+    if not inv or inv.school_id != school_id or inv.deleted_at:
+        raise HTTPException(status_code=404, detail="Invoice not found")
 
-    payments = (await db.execute(select(Payment).where(
+    rows = (await db.execute(select(Payment).where(
         Payment.school_id == school_id,
-        Payment.paid_at == day,
+        Payment.invoice_id == invoice_id,
         Payment.deleted_at.is_(None)))).scalars().all()
 
-    invoices = {i.id: i for i in (await db.execute(select(Invoice).where(
-        Invoice.school_id == school_id))).scalars().all()}
-    from app.models.student import Student as _Student
-    students = {s.id: s for s in (await db.execute(select(_Student).where(
-        _Student.school_id == school_id))).scalars().all()}
     users = {u.id: f"{u.first_name} {u.last_name}"
              for u in (await db.execute(select(User).where(
                  User.school_id == school_id))).scalars().all()}
 
-    by_method: dict[str, dict] = {}
-    by_recorder: dict[str, dict] = {}
-    rows = []
-    for p in sorted(payments, key=lambda x: str(x.created_at)):
-        method = str(getattr(p.method, "value", p.method))
-        inv = invoices.get(p.invoice_id)
-        st = students.get(inv.student_id) if inv else None
-        recorder = users.get(p.received_by, "system (webhook)") if p.received_by else "system (webhook)"
-
-        by_method.setdefault(method, {"count": 0, "total": 0.0})
-        by_method[method]["count"] += 1
-        by_method[method]["total"] = round(by_method[method]["total"] + p.amount, 2)
-
-        by_recorder.setdefault(recorder, {"count": 0, "total": 0.0})
-        by_recorder[recorder]["count"] += 1
-        by_recorder[recorder]["total"] = round(by_recorder[recorder]["total"] + p.amount, 2)
-
-        rows.append({
-            "time": str(p.created_at)[11:16] if p.created_at else "",
-            "reference": p.reference,
-            "receipt_number": f"RCP-{p.reference}",
-            "student": f"{st.first_name} {st.last_name}" if st else "?",
-            "admission_number": st.admission_number if st else "",
-            "invoice_number": inv.invoice_number if inv else "",
-            "amount": p.amount,
-            "method": method,
-            "recorded_by": recorder,
-        })
-
-    return {
-        "date": date,
-        "payments": rows,
-        "count": len(rows),
-        "grand_total": round(sum(p.amount for p in payments), 2),
-        "by_method": by_method,
-        "by_recorder": by_recorder,
-        "note": ("Count the physical cash against the CASH total here. If they "
-                 "disagree, every entry above carries a teller reference, a "
-                 "time and the person who recorded it."),
-    }
+    out = [{
+        "payment_id": p.id,
+        "reference": p.reference,
+        "receipt_number": f"RCP-{p.reference}",
+        "amount": p.amount,
+        "method": str(getattr(p.method, "value", p.method)),
+        "paid_at": str(p.paid_at) if p.paid_at else None,
+        "recorded_by": (users.get(p.received_by) if p.received_by
+                        else "system (online payment)"),
+    } for p in rows]
+    out.sort(key=lambda r: (r["paid_at"] or "", r["reference"]), reverse=True)
+    return out

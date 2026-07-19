@@ -292,3 +292,61 @@ async def test_receipt_still_renders_without_any_branding(ctx):
     pid = pay.get("payment_id") or pay.get("id")
     r = await client.get(f"/api/fees/payments/{pid}/receipt", headers=ah)
     assert r.status_code == 200 and r.content[:4] == b"%PDF"
+
+
+async def test_every_payment_on_an_invoice_stays_reprintable(ctx):
+    """A parent paying in instalments must be able to get evidence for any one
+    of them, at any time — not only in the session where it was recorded."""
+    client, ids = ctx
+    ah = await headers(client, "admin@gss-ikeja.ng", "admin123")
+    from app.models.academics import ClassArm
+    async with ids["session_factory"]() as db:
+        arm = await db.get(ClassArm, ids["arm_id"])
+        class_id = arm.class_id
+    cat = (await client.post("/api/fees/categories", headers=ah,
+           json={"name": "Fees"})).json()
+    await client.post("/api/fees/structures", headers=ah, json={
+        "class_id": class_id, "term_id": ids["term_id"],
+        "category_id": cat["id"], "amount": 60000})
+    await client.post("/api/fees/invoices/generate", headers=ah,
+                      json={"arm_id": ids["arm_id"], "term_id": ids["term_id"]})
+    inv = (await client.get("/api/fees/invoices", headers=ah,
+           params={"term_id": ids["term_id"]})).json()[0]
+
+    # three instalments: part, part, then the balance
+    for amount, ref, day in ((20000, "TELLER-A", "2026-07-10"),
+                             (25000, "TELLER-B", "2026-07-14"),
+                             (15000, "TELLER-C", "2026-07-17")):
+        await client.post("/api/fees/payments", headers=ah, json={
+            "invoice_id": inv["id"], "amount": amount, "method": "cash",
+            "reference": ref, "paid_at": day})
+
+    rows = (await client.get(f"/api/fees/invoices/{inv['id']}/payments",
+            headers=ah)).json()
+    assert len(rows) == 3
+    assert {r["reference"] for r in rows} == {"TELLER-A", "TELLER-B", "TELLER-C"}
+    assert rows[0]["paid_at"] == "2026-07-17"          # newest first
+    assert all(r["recorded_by"] == "Amaka Okoro" for r in rows)
+
+    # each instalment prints its own receipt, including the part payments
+    for r in rows:
+        pdf = await client.get(f"/api/fees/payments/{r['payment_id']}/receipt",
+                               headers=ah)
+        assert pdf.status_code == 200 and pdf.content[:4] == b"%PDF"
+
+    # the invoice is now fully paid, and the receipts still all exist
+    after = (await client.get("/api/fees/invoices", headers=ah,
+             params={"term_id": ids["term_id"]})).json()
+    paid = next(i for i in after if i["id"] == inv["id"])
+    assert paid["balance"] == 0 and paid["status"] == "paid"
+    assert len((await client.get(f"/api/fees/invoices/{inv['id']}/payments",
+                headers=ah)).json()) == 3
+
+
+async def test_invoice_payments_are_tenant_scoped(ctx):
+    client, ids = ctx
+    ah = await headers(client, "admin@gss-ikeja.ng", "admin123")
+    # an invoice id from another school must 404, never leak
+    r = await client.get("/api/fees/invoices/not-a-real-invoice/payments",
+                         headers=ah)
+    assert r.status_code == 404
