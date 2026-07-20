@@ -763,3 +763,106 @@ async def bulk_receipts(
     return StreamingResponse(
         buf, media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{label}.zip"'})
+
+
+@router.post("/invoices/backfill-items")
+async def backfill_invoice_items(
+    request: Request, db: DbDep,
+    admin: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN))],
+    term_id: str = Query(...),
+    commit: bool = Query(False, description="false previews, true writes"),
+):
+    """Reconstruct the fee breakdown for invoices issued before Fiyox stored it.
+
+    Invoices created earlier hold only a total, so their receipts print without
+    the itemised list. This rebuilds the lines from the fee structures of each
+    invoice's own class and term.
+
+    The safety rule: a breakdown is only written when the structures add up to
+    *exactly* the amount already billed on that invoice. If the school has
+    since changed its fees, the sums disagree — and inventing a breakdown that
+    contradicts what a parent actually paid would be worse than showing none.
+    Those invoices are reported as skipped, and left exactly as they are.
+
+    Preview first (commit=false); nothing is written until you say so.
+    """
+    from app.models.academics import ClassArm
+    from app.models.fees import FeeCategory, FeeStructure, InvoiceItem
+
+    school_id = tenant_scope(admin)
+
+    invoices = (await db.execute(select(Invoice).where(
+        Invoice.school_id == school_id,
+        Invoice.term_id == term_id,
+        Invoice.deleted_at.is_(None)))).scalars().all()
+    if not invoices:
+        raise HTTPException(status_code=404, detail="No invoices for that term")
+
+    already = set((await db.execute(select(InvoiceItem.invoice_id).where(
+        InvoiceItem.school_id == school_id,
+        InvoiceItem.deleted_at.is_(None)))).scalars().all())
+
+    cat_names = {c.id: c.name for c in (await db.execute(select(FeeCategory).where(
+        FeeCategory.school_id == school_id))).scalars().all()}
+    structures = (await db.execute(select(FeeStructure).where(
+        FeeStructure.school_id == school_id,
+        FeeStructure.term_id == term_id))).scalars().all()
+
+    by_class: dict[str, list] = {}
+    for s in structures:
+        by_class.setdefault(s.class_id, []).append(s)
+
+    students = {s.id: s for s in (await db.execute(select(Student).where(
+        Student.school_id == school_id))).scalars().all()}
+    arms = {a.id: a for a in (await db.execute(select(ClassArm).where(
+        ClassArm.school_id == school_id))).scalars().all()}
+
+    filled, skipped_existing, mismatched = 0, 0, []
+    for inv in invoices:
+        if inv.id in already:
+            skipped_existing += 1
+            continue
+
+        st = students.get(inv.student_id)
+        arm = arms.get(st.current_arm_id) if st and st.current_arm_id else None
+        lines = by_class.get(arm.class_id, []) if arm else []
+        total = round(float(sum(s.amount for s in lines)), 2)
+
+        if not lines or total != round(float(inv.amount), 2):
+            mismatched.append({
+                "invoice_number": inv.invoice_number,
+                "billed": float(inv.amount),
+                "structures_total": total,
+                "reason": ("no fee structure found for this student's class"
+                           if not lines else
+                           "the fee structure has changed since this invoice was issued"),
+            })
+            continue
+
+        if commit:
+            for s in lines:
+                db.add(InvoiceItem(
+                    school_id=school_id, invoice_id=inv.id,
+                    category_id=s.category_id,
+                    category_name=cat_names.get(s.category_id, "Fee"),
+                    amount=float(s.amount), created_by=admin.id))
+        filled += 1
+
+    if commit and filled:
+        await record_audit(
+            db, school_id=school_id, user_id=admin.id, action="update",
+            table_name="invoice_items", record_id=None,
+            changes={"backfilled": {"old": None, "new": filled}},
+            ip_address=request.client.host if request.client else None)
+        await db.commit()
+
+    return {
+        "committed": commit,
+        "invoices_seen": len(invoices),
+        "breakdown_added": filled,
+        "already_had_breakdown": skipped_existing,
+        "left_alone": mismatched,
+        "note": ("Breakdowns written." if commit and filled else
+                 "Preview only — nothing was written." if not commit else
+                 "Nothing to do."),
+    }

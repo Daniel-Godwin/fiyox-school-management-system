@@ -288,6 +288,47 @@ export default function FeesPage() {
     } finally { setBusy(null); }
   }
 
+  async function backfillBreakdown() {
+    if (!termId) return;
+    setBusy("backfill"); setNotice(null);
+    try {
+      const preview = await api<{
+        invoices_seen: number; breakdown_added: number;
+        already_had_breakdown: number;
+        left_alone: { invoice_number: string; billed: number; structures_total: number; reason: string }[];
+      }>(`/api/fees/invoices/backfill-items?term_id=${termId}&commit=false`, { method: "POST" });
+
+      if (preview.breakdown_added === 0) {
+        setNotice({
+          kind: "err",
+          text: preview.already_had_breakdown === preview.invoices_seen
+            ? "Every invoice already shows its breakdown."
+            : `No invoice could be matched safely. ${preview.left_alone[0]?.reason ?? ""}`,
+        });
+        return;
+      }
+
+      const skipped = preview.left_alone.length;
+      if (!confirm(
+        `Add the fee breakdown to ${preview.breakdown_added} invoice(s) for this term?\n\n` +
+        (skipped
+          ? `${skipped} invoice(s) will be LEFT ALONE because the fee structure has changed since they were issued — inventing a breakdown that contradicts what a parent paid would be wrong.\n\n`
+          : "") +
+        `Nothing about the amounts billed or paid changes — this only records what the total was made up of.`
+      )) return;
+
+      const done = await api<{ breakdown_added: number }>(
+        `/api/fees/invoices/backfill-items?term_id=${termId}&commit=true`, { method: "POST" });
+      setNotice({
+        kind: "ok",
+        text: `Breakdown added to ${done.breakdown_added} invoice(s). Their receipts now show what the fees are for.`,
+      });
+      await load();
+    } catch (e) {
+      setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not add the breakdown." });
+    } finally { setBusy(null); }
+  }
+
   async function downloadDayReceipts() {
     if (!recon || recon.count === 0) return;
     // One zip beats a dozen browser tabs: it files, prints in order, and
@@ -544,6 +585,11 @@ export default function FeesPage() {
         <button onClick={generate} disabled={!termId || !genArmId || busy !== null}
                 className="rounded-md bg-ink text-white px-4 py-2 text-sm font-medium hover:bg-ink-soft disabled:opacity-50">
           {busy === "generate" ? "Generating…" : "Generate invoices"}
+        </button>
+        <button onClick={backfillBreakdown} disabled={!termId || busy !== null}
+                title="Invoices issued before Fiyox stored the breakdown show only a total on their receipts. This records what that total was made up of, without changing any amount."
+                className="rounded-md border border-line px-4 py-2 text-sm font-medium hover:border-ink disabled:opacity-40">
+          {busy === "backfill" ? "Checking…" : "Add breakdown to old invoices"}
         </button>
         {notice && (
           <span role="status"

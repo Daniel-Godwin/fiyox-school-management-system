@@ -568,3 +568,118 @@ async def test_receipt_prints_for_an_invoice_with_no_line_items(ctx):
     pid = pay.get("payment_id") or pay.get("id")
     r = await client.get(f"/api/fees/payments/{pid}/receipt", headers=ah)
     assert r.status_code == 200 and r.content[:4] == b"%PDF"
+
+
+async def test_backfill_adds_breakdown_to_older_invoices(ctx):
+    """Invoices issued before Fiyox stored line items print only a total. The
+    backfill reconstructs the breakdown from the fee structures they were
+    billed from."""
+    from sqlalchemy import select as _select
+    from app.models.fees import InvoiceItem
+
+    client, ids = ctx
+    ah = await headers(client, "admin@gss-ikeja.ng", "admin123")
+    from app.models.academics import ClassArm
+    async with ids["session_factory"]() as db:
+        arm = await db.get(ClassArm, ids["arm_id"])
+        class_id = arm.class_id
+    for name, amount in (("Tuition", 35000), ("PTA Levy", 3000)):
+        c = (await client.post("/api/fees/categories", headers=ah,
+             json={"name": name})).json()
+        await client.post("/api/fees/structures", headers=ah, json={
+            "class_id": class_id, "term_id": ids["term_id"],
+            "category_id": c["id"], "amount": amount})
+    await client.post("/api/fees/invoices/generate", headers=ah,
+                      json={"arm_id": ids["arm_id"], "term_id": ids["term_id"]})
+
+    # simulate legacy invoices: remove the lines
+    async with ids["session_factory"]() as db:
+        for row in (await db.execute(_select(InvoiceItem))).scalars().all():
+            await db.delete(row)
+        await db.commit()
+    inv = (await client.get("/api/fees/invoices", headers=ah,
+           params={"term_id": ids["term_id"]})).json()[0]
+    assert inv["items"] == []
+
+    # preview writes nothing
+    preview = (await client.post(
+        f"/api/fees/invoices/backfill-items?term_id={ids['term_id']}&commit=false",
+        headers=ah)).json()
+    assert preview["breakdown_added"] == 3 and preview["committed"] is False
+    still = (await client.get("/api/fees/invoices", headers=ah,
+             params={"term_id": ids["term_id"]})).json()[0]
+    assert still["items"] == []
+
+    # commit fills them in
+    done = (await client.post(
+        f"/api/fees/invoices/backfill-items?term_id={ids['term_id']}&commit=true",
+        headers=ah)).json()
+    assert done["breakdown_added"] == 3
+    after = (await client.get("/api/fees/invoices", headers=ah,
+             params={"term_id": ids["term_id"]})).json()[0]
+    assert {i["name"]: i["amount"] for i in after["items"]} == {
+        "Tuition": 35000, "PTA Levy": 3000}
+    assert round(sum(i["amount"] for i in after["items"]), 2) == after["amount"]
+
+    # running it again is harmless — nothing is duplicated
+    again = (await client.post(
+        f"/api/fees/invoices/backfill-items?term_id={ids['term_id']}&commit=true",
+        headers=ah)).json()
+    assert again["breakdown_added"] == 0 and again["already_had_breakdown"] == 3
+
+
+async def test_backfill_refuses_to_invent_a_breakdown_that_contradicts_the_bill(ctx):
+    """If the school changed its fees after issuing invoices, the structures no
+    longer add up to what the parent was billed. Printing that as the breakdown
+    would be a false receipt — so those invoices are left alone."""
+    from sqlalchemy import select as _select
+    from app.models.fees import FeeStructure, InvoiceItem
+
+    client, ids = ctx
+    ah = await headers(client, "admin@gss-ikeja.ng", "admin123")
+    from app.models.academics import ClassArm
+    async with ids["session_factory"]() as db:
+        arm = await db.get(ClassArm, ids["arm_id"])
+        class_id = arm.class_id
+    cat = (await client.post("/api/fees/categories", headers=ah,
+           json={"name": "Tuition"})).json()
+    await client.post("/api/fees/structures", headers=ah, json={
+        "class_id": class_id, "term_id": ids["term_id"],
+        "category_id": cat["id"], "amount": 20000})
+    await client.post("/api/fees/invoices/generate", headers=ah,
+                      json={"arm_id": ids["arm_id"], "term_id": ids["term_id"]})
+
+    async with ids["session_factory"]() as db:
+        for row in (await db.execute(_select(InvoiceItem))).scalars().all():
+            await db.delete(row)
+        # the school raises tuition AFTER the invoices went out
+        s = (await db.execute(_select(FeeStructure))).scalars().first()
+        s.amount = 50000
+        await db.commit()
+
+    r = (await client.post(
+        f"/api/fees/invoices/backfill-items?term_id={ids['term_id']}&commit=true",
+        headers=ah)).json()
+    assert r["breakdown_added"] == 0
+    assert len(r["left_alone"]) == 3
+    assert r["left_alone"][0]["billed"] == 20000
+    assert r["left_alone"][0]["structures_total"] == 50000
+    assert "changed" in r["left_alone"][0]["reason"]
+
+    # the invoices are untouched: still no breakdown, amounts intact
+    invs = (await client.get("/api/fees/invoices", headers=ah,
+            params={"term_id": ids["term_id"]})).json()
+    assert all(i["items"] == [] and i["amount"] == 20000 for i in invs)
+
+
+async def test_backfill_is_admin_only(ctx):
+    client, ids = ctx
+    bh = await headers(client, "admin@gss-ikeja.ng", "admin123")
+    await client.post("/api/users", headers=bh, json={
+        "email": "bursar2@x.ng", "role": "bursar", "first_name": "B",
+        "last_name": "R", "password": "burs1234"})
+    h = await headers(client, "bursar2@x.ng", "burs1234")
+    r = await client.post(
+        f"/api/fees/invoices/backfill-items?term_id={ids['term_id']}&commit=true",
+        headers=h)
+    assert r.status_code == 403
