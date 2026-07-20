@@ -140,14 +140,12 @@ async def pay(
 
 # ---------- Receipt PDF ----------
 async def _invoice_items(db, school_id: str, invoice_id: str) -> list[dict]:
-    """The billed breakdown for an invoice, as frozen when it was issued."""
-    from app.models.fees import InvoiceItem
-    rows = (await db.execute(select(InvoiceItem).where(
-        InvoiceItem.school_id == school_id,
-        InvoiceItem.invoice_id == invoice_id,
-        InvoiceItem.deleted_at.is_(None)))).scalars().all()
-    return [{"name": r.category_name, "amount": r.amount}
-            for r in sorted(rows, key=lambda x: (-x.amount, x.category_name))]
+    """The billed breakdown for a receipt — stored lines, or safely derived."""
+    from app.services.fees import invoice_breakdown
+    inv = await db.get(Invoice, invoice_id)
+    if not inv or inv.school_id != school_id:
+        return []
+    return await invoice_breakdown(db, inv)
 
 
 @router.get("/payments/{payment_id}/receipt")

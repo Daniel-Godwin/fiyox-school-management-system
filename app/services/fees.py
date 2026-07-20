@@ -29,15 +29,60 @@ def status_for(amount: float, discount: float, paid: float) -> InvoiceStatus:
     return InvoiceStatus.PART_PAID
 
 
+async def invoice_breakdown(db: AsyncSession, inv: Invoice) -> list[dict]:
+    """What an invoice's total is made up of.
+
+    Two sources, in order of trust:
+
+    1. **Stored lines** (`invoice_items`) — snapshotted when the invoice was
+       issued. Authoritative: they are what the parent was actually billed.
+    2. **Derived from the current fee structures** — for invoices issued before
+       Fiyox stored lines. Only used when those structures add up to *exactly*
+       the amount on the invoice. If the school has changed its fees since, the
+       sums disagree and we return nothing rather than print a breakdown that
+       contradicts the bill. A false receipt is worse than a plain one.
+
+    This means older receipts show their breakdown automatically wherever it
+    can be established safely, with no migration step for the school.
+    """
+    from app.models.fees import FeeCategory, FeeStructure, InvoiceItem
+
+    stored = (await db.execute(select(InvoiceItem).where(
+        InvoiceItem.invoice_id == inv.id,
+        InvoiceItem.deleted_at.is_(None)))).scalars().all()
+    if stored:
+        return [{"name": r.category_name, "amount": r.amount}
+                for r in sorted(stored, key=lambda x: (-x.amount, x.category_name))]
+
+    student = await db.get(Student, inv.student_id)
+    if not student or not student.current_arm_id:
+        return []
+    arm = await db.get(ClassArm, student.current_arm_id)
+    if not arm:
+        return []
+
+    structures = (await db.execute(select(FeeStructure).where(
+        FeeStructure.school_id == inv.school_id,
+        FeeStructure.class_id == arm.class_id,
+        FeeStructure.term_id == inv.term_id))).scalars().all()
+    if not structures:
+        return []
+    total = round(float(sum(s.amount for s in structures)), 2)
+    if total != round(float(inv.amount), 2):
+        return []          # the bill and the current structures disagree
+
+    names = {c.id: c.name for c in (await db.execute(select(FeeCategory).where(
+        FeeCategory.school_id == inv.school_id))).scalars().all()}
+    lines = [{"name": names.get(s.category_id, "Fee"), "amount": float(s.amount)}
+             for s in structures]
+    return sorted(lines, key=lambda x: (-x["amount"], x["name"]))
+
+
 async def invoice_view(db: AsyncSession, inv: Invoice) -> dict:
     paid = await paid_total(db, inv.id)
 
-    # the itemised bill, as frozen when the invoice was issued — parents see
-    # what they are paying for, not just a total
-    from app.models.fees import InvoiceItem
-    lines = (await db.execute(select(InvoiceItem).where(
-        InvoiceItem.invoice_id == inv.id,
-        InvoiceItem.deleted_at.is_(None)))).scalars().all()
+    # what the total is made up of — stored lines, or safely derived
+    lines = await invoice_breakdown(db, inv)
 
     return {
         "id": inv.id, "student_id": inv.student_id, "term_id": inv.term_id,
@@ -45,8 +90,7 @@ async def invoice_view(db: AsyncSession, inv: Invoice) -> dict:
         "discount": inv.discount, "paid": round(paid, 2),
         "balance": round(inv.amount - inv.discount - paid, 2),
         "status": inv.status, "due_date": inv.due_date,
-        "items": [{"name": l.category_name, "amount": l.amount}
-                  for l in sorted(lines, key=lambda x: (-x.amount, x.category_name))],
+        "items": lines,
     }
 
 

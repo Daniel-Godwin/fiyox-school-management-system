@@ -599,16 +599,19 @@ async def test_backfill_adds_breakdown_to_older_invoices(ctx):
         await db.commit()
     inv = (await client.get("/api/fees/invoices", headers=ah,
            params={"term_id": ids["term_id"]})).json()[0]
-    assert inv["items"] == []
+    # the breakdown is now DERIVED on the fly (structures still match the bill),
+    # so parents already see it; the backfill makes it permanent so a future
+    # fee change cannot take it away
+    assert {i["name"] for i in inv["items"]} == {"Tuition", "PTA Levy"}
 
     # preview writes nothing
     preview = (await client.post(
         f"/api/fees/invoices/backfill-items?term_id={ids['term_id']}&commit=false",
         headers=ah)).json()
     assert preview["breakdown_added"] == 3 and preview["committed"] is False
-    still = (await client.get("/api/fees/invoices", headers=ah,
-             params={"term_id": ids["term_id"]})).json()[0]
-    assert still["items"] == []
+    from sqlalchemy import select as _sel
+    async with ids["session_factory"]() as db:
+        assert (await db.execute(_sel(InvoiceItem))).scalars().first() is None
 
     # commit fills them in
     done = (await client.post(
@@ -683,3 +686,114 @@ async def test_backfill_is_admin_only(ctx):
         f"/api/fees/invoices/backfill-items?term_id={ids['term_id']}&commit=true",
         headers=h)
     assert r.status_code == 403
+
+
+async def test_breakdown_is_derived_for_invoices_that_have_no_stored_lines(ctx):
+    """Invoices issued before Fiyox stored line items must still show what the
+    fees were for — derived from the structures they were billed from, with no
+    migration step for the school."""
+    from sqlalchemy import select as _select
+    from app.models.fees import InvoiceItem
+
+    client, ids = ctx
+    ah = await headers(client, "admin@gss-ikeja.ng", "admin123")
+    from app.models.academics import ClassArm
+    async with ids["session_factory"]() as db:
+        arm = await db.get(ClassArm, ids["arm_id"])
+        class_id = arm.class_id
+    for name, amount in (("Tuition", 15000), ("PTA Levy", 3000),
+                         ("Examination", 5000)):
+        c = (await client.post("/api/fees/categories", headers=ah,
+             json={"name": name})).json()
+        await client.post("/api/fees/structures", headers=ah, json={
+            "class_id": class_id, "term_id": ids["term_id"],
+            "category_id": c["id"], "amount": amount})
+    await client.post("/api/fees/invoices/generate", headers=ah,
+                      json={"arm_id": ids["arm_id"], "term_id": ids["term_id"]})
+
+    # strip the stored lines: this is exactly an invoice issued by an older build
+    async with ids["session_factory"]() as db:
+        for row in (await db.execute(_select(InvoiceItem))).scalars().all():
+            await db.delete(row)
+        await db.commit()
+
+    inv = (await client.get("/api/fees/invoices", headers=ah,
+           params={"term_id": ids["term_id"]})).json()[0]
+    assert inv["amount"] == 23000
+    lines = {i["name"]: i["amount"] for i in inv["items"]}
+    assert lines == {"Tuition": 15000, "PTA Levy": 3000, "Examination": 5000}
+
+    # and the receipt prints it
+    pay = (await client.post("/api/fees/payments", headers=ah, json={
+        "invoice_id": inv["id"], "amount": 15000, "method": "cash",
+        "reference": "0016", "paid_at": "2026-07-18"})).json()
+    pid = pay.get("payment_id") or pay.get("id")
+    pdf = await client.get(f"/api/fees/payments/{pid}/receipt", headers=ah)
+    assert pdf.status_code == 200 and pdf.content[:4] == b"%PDF"
+
+
+async def test_derivation_refuses_when_the_bill_and_structures_disagree(ctx):
+    """If the school changed its fees after issuing an invoice, no breakdown is
+    shown — better a plain receipt than one that contradicts what was paid."""
+    from sqlalchemy import select as _select
+    from app.models.fees import FeeStructure, InvoiceItem
+
+    client, ids = ctx
+    ah = await headers(client, "admin@gss-ikeja.ng", "admin123")
+    from app.models.academics import ClassArm
+    async with ids["session_factory"]() as db:
+        arm = await db.get(ClassArm, ids["arm_id"])
+        class_id = arm.class_id
+    cat = (await client.post("/api/fees/categories", headers=ah,
+           json={"name": "Tuition"})).json()
+    await client.post("/api/fees/structures", headers=ah, json={
+        "class_id": class_id, "term_id": ids["term_id"],
+        "category_id": cat["id"], "amount": 20000})
+    await client.post("/api/fees/invoices/generate", headers=ah,
+                      json={"arm_id": ids["arm_id"], "term_id": ids["term_id"]})
+
+    async with ids["session_factory"]() as db:
+        for row in (await db.execute(_select(InvoiceItem))).scalars().all():
+            await db.delete(row)
+        s = (await db.execute(_select(FeeStructure))).scalars().first()
+        s.amount = 50000                      # fees raised after billing
+        await db.commit()
+
+    inv = (await client.get("/api/fees/invoices", headers=ah,
+           params={"term_id": ids["term_id"]})).json()[0]
+    assert inv["amount"] == 20000
+    assert inv["items"] == []                 # no invented breakdown
+
+
+async def test_stored_lines_always_win_over_derivation(ctx):
+    """Once lines are stored they are the truth, even if the school's current
+    structures now say something different."""
+    from sqlalchemy import select as _select
+    from app.models.fees import FeeStructure
+
+    client, ids = ctx
+    ah = await headers(client, "admin@gss-ikeja.ng", "admin123")
+    from app.models.academics import ClassArm
+    async with ids["session_factory"]() as db:
+        arm = await db.get(ClassArm, ids["arm_id"])
+        class_id = arm.class_id
+    cat = (await client.post("/api/fees/categories", headers=ah,
+           json={"name": "Tuition"})).json()
+    await client.post("/api/fees/structures", headers=ah, json={
+        "class_id": class_id, "term_id": ids["term_id"],
+        "category_id": cat["id"], "amount": 20000})
+    await client.post("/api/fees/invoices/generate", headers=ah,
+                      json={"arm_id": ids["arm_id"], "term_id": ids["term_id"]})
+
+    async with ids["session_factory"]() as db:
+        s = (await db.execute(_select(FeeStructure))).scalars().first()
+        s.amount = 20000     # unchanged total, but rename the category
+        from app.models.fees import FeeCategory
+        c = await db.get(FeeCategory, cat["id"])
+        c.name = "Tuition (renamed later)"
+        await db.commit()
+
+    inv = (await client.get("/api/fees/invoices", headers=ah,
+           params={"term_id": ids["term_id"]})).json()[0]
+    # the stored snapshot keeps the ORIGINAL name, not the new one
+    assert inv["items"] == [{"name": "Tuition", "amount": 20000}]
