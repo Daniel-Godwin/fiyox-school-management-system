@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, openPdf, ApiError } from "@/lib/api";
+import { api, openPdf, downloadFile, ApiError } from "@/lib/api";
 
 type Term = { id: string; name: string; session: string; is_current: boolean };
 type Arm = { id: string; label: string };
@@ -288,19 +288,28 @@ export default function FeesPage() {
     } finally { setBusy(null); }
   }
 
-  async function printAllReceipts() {
-    if (!recon || recon.payments.length === 0) return;
-    // Browsers block a burst of pop-ups, so open them one at a time with a
-    // short gap — enough for the day's takings without tripping the blocker.
-    setNotice({
-      kind: "ok",
-      text: `Opening ${recon.payments.length} receipt${recon.payments.length === 1 ? "" : "s"} — allow pop-ups if your browser asks.`,
-    });
-    for (const p of recon.payments) {
-      try { await openPdf(`/api/fees/payments/${p.payment_id}/receipt`); }
-      catch { /* keep going: one failure must not stop the batch */ }
-      await new Promise((r) => setTimeout(r, 400));
-    }
+  async function downloadDayReceipts() {
+    if (!recon || recon.count === 0) return;
+    // One zip beats a dozen browser tabs: it files, prints in order, and
+    // survives an audit.
+    setBusy("zip"); setNotice(null);
+    try {
+      await downloadFile(`/api/fees/receipts.zip?date=${reconDate}`,
+                         `receipts-${reconDate}.zip`);
+      setNotice({ kind: "ok", text: `${recon.count} receipt${recon.count === 1 ? "" : "s"} downloaded as a zip.` });
+    } catch (e) {
+      setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not build the receipts zip." });
+    } finally { setBusy(null); }
+  }
+
+  async function downloadInvoiceReceipts(inv: Invoice) {
+    setBusy(`zip-${inv.id}`); setNotice(null);
+    try {
+      await downloadFile(`/api/fees/receipts.zip?invoice_id=${inv.id}`,
+                         `receipts-${inv.invoice_number}.zip`);
+    } catch (e) {
+      setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not build the zip." });
+    } finally { setBusy(null); }
   }
 
   async function openReceipts(inv: Invoice) {
@@ -312,7 +321,9 @@ export default function FeesPage() {
       setReceiptList(rows);
       // exactly one payment: skip the picker and open it straight away
       if (rows.length === 1) {
-        await openPdf(`/api/fees/payments/${rows[0].payment_id}/receipt`);
+        await downloadFile(
+          `/api/fees/payments/${rows[0].payment_id}/receipt?download=true`,
+          `receipt_${rows[0].reference}.pdf`);
         setReceiptsFor(null);
       }
     } catch (e) {
@@ -683,10 +694,19 @@ export default function FeesPage() {
           )}
           {receiptList && receiptList.length > 0 && (
             <>
-              <p className="text-xs text-ink-soft">
-                This invoice was paid in {receiptList.length} instalment
-                {receiptList.length === 1 ? "" : "s"} — each has its own receipt.
-              </p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-ink-soft">
+                  This invoice was paid in {receiptList.length} instalment
+                  {receiptList.length === 1 ? "" : "s"} — each has its own receipt.
+                </p>
+                {receiptList.length > 1 && (
+                  <button onClick={() => downloadInvoiceReceipts(receiptsFor)}
+                          disabled={busy !== null}
+                          className="rounded-md border border-line bg-white px-3 py-1.5 text-xs font-medium hover:border-ink disabled:opacity-40">
+                    {busy === `zip-${receiptsFor.id}` ? "Preparing…" : "Download all (.zip)"}
+                  </button>
+                )}
+              </div>
               <ul className="space-y-1">
                 {receiptList.map((p) => (
                   <li key={p.payment_id}
@@ -697,10 +717,16 @@ export default function FeesPage() {
                       <span className="ml-2 text-xs text-ink-soft font-mono">{p.reference}</span>
                       <span className="ml-2 text-xs text-ink-soft">{p.paid_at ?? ""}</span>
                     </span>
-                    <button onClick={() => openPdf(`/api/fees/payments/${p.payment_id}/receipt`)}
-                            className="text-xs text-ink underline underline-offset-2 hover:text-ink-soft">
-                      Print receipt
-                    </button>
+                    <span className="flex gap-3">
+                      <button onClick={() => openPdf(`/api/fees/payments/${p.payment_id}/receipt`)}
+                              className="text-xs text-ink underline underline-offset-2 hover:text-ink-soft">
+                        View
+                      </button>
+                      <button onClick={() => downloadFile(`/api/fees/payments/${p.payment_id}/receipt?download=true`, `receipt_${p.reference}.pdf`)}
+                              className="text-xs text-ink underline underline-offset-2 hover:text-ink-soft">
+                        Download
+                      </button>
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -731,10 +757,10 @@ export default function FeesPage() {
             {reconBusy ? "Loading…" : "Show the day"}
           </button>
           {recon && recon.count > 0 && (
-            <button onClick={printAllReceipts} disabled={reconBusy}
-                    title="Open a printable receipt for every payment taken on this date"
+            <button onClick={downloadDayReceipts} disabled={reconBusy || busy !== null}
+                    title="Download every receipt for this date as one zip file"
                     className="rounded-md border border-line px-4 py-2 text-sm font-medium hover:border-ink disabled:opacity-40">
-              Print all {recon.count} receipt{recon.count === 1 ? "" : "s"}
+              {busy === "zip" ? "Preparing…" : `Download all ${recon.count} receipt${recon.count === 1 ? "" : "s"} (.zip)`}
             </button>
           )}
           {recon && (
@@ -786,9 +812,9 @@ export default function FeesPage() {
                       <td className="px-3 py-2 uppercase text-xs">{p.method}</td>
                       <td className="px-3 py-2">{p.recorded_by}</td>
                       <td className="px-3 py-2 text-right">
-                        <button onClick={() => openPdf(`/api/fees/payments/${p.payment_id}/receipt`)}
+                        <button onClick={() => downloadFile(`/api/fees/payments/${p.payment_id}/receipt?download=true`, `receipt_${p.reference}.pdf`)}
                                 className="text-xs text-ink underline underline-offset-2 hover:text-ink-soft">
-                          Receipt
+                          Download
                         </button>
                       </td>
                     </tr>

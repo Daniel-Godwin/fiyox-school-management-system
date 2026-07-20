@@ -142,6 +142,7 @@ async def pay(
 @router.get("/payments/{payment_id}/receipt")
 async def payment_receipt(
     payment_id: str, db: DbDep, user: Annotated[User, FinanceRoles],
+    download: bool = Query(False, description="save the file instead of opening it"),
 ):
     school_id = tenant_scope(user)
     pay = await db.get(Payment, payment_id)
@@ -170,8 +171,10 @@ async def payment_receipt(
         "received_by": f"{receiver.first_name} {receiver.last_name}" if receiver else None,
     })
     fname = f"receipt_{pay.reference}.pdf"
-    return StreamingResponse(BytesIO(pdf), media_type="application/pdf",
-                             headers={"Content-Disposition": f'inline; filename="{fname}"'})
+    disposition = "attachment" if download else "inline"
+    return StreamingResponse(
+        BytesIO(pdf), media_type="application/pdf",
+        headers={"Content-Disposition": f'{disposition}; filename="{fname}"'})
 
 
 # ---------- Bursar summary ----------
@@ -635,3 +638,115 @@ async def invoice_payments(
     } for p in rows]
     out.sort(key=lambda r: (r["paid_at"] or "", r["reference"]), reverse=True)
     return out
+
+
+async def _receipt_bytes_for(db, school_id: str, pay: Payment) -> tuple[str, bytes]:
+    """Render one payment's receipt, returning (filename, pdf bytes)."""
+    inv = await db.get(Invoice, pay.invoice_id)
+    student = await db.get(Student, inv.student_id) if inv else None
+    school = await db.get(School, school_id)
+    receiver = await db.get(User, pay.received_by) if pay.received_by else None
+    inv_view = await invoice_view(db, inv) if inv else {
+        "amount": 0, "discount": 0, "paid": 0, "balance": 0, "status": ""}
+
+    pdf = build_receipt_pdf({
+        "school": {"name": school.name, "address": school.address,
+                   "state": school.state, "color": school.primary_color,
+                   "logo_url": school.logo_url,
+                   "signature_url": school.signature_url,
+                   "stamp_url": school.stamp_url,
+                   "principal_name": school.principal_name},
+        "receipt_number": f"RCP-{pay.reference}",
+        "student_name": (f"{student.first_name} {student.last_name}"
+                         if student else "?"),
+        "admission_number": student.admission_number if student else "",
+        "invoice_number": inv.invoice_number if inv else "",
+        "method": pay.method, "reference": pay.reference,
+        "amount": pay.amount, "paid_at": pay.paid_at,
+        "invoice": inv_view,
+        "received_by": (f"{receiver.first_name} {receiver.last_name}"
+                        if receiver else None),
+    })
+    safe_ref = "".join(ch if ch.isalnum() or ch in "-_" else "_"
+                       for ch in str(pay.reference))
+    adm = (student.admission_number if student else "unknown").replace("/", "-")
+    return f"{adm}_{safe_ref}.pdf", pdf
+
+
+@router.get("/receipts.zip")
+async def bulk_receipts(
+    db: DbDep, user: Annotated[User, FinanceRoles],
+    date: str | None = Query(None, description="all receipts for one day, YYYY-MM-DD"),
+    invoice_id: str | None = Query(None, description="all receipts on one invoice"),
+    term_id: str | None = Query(None, description="all receipts for a whole term"),
+):
+    """Download many receipts at once as a single ZIP.
+
+    Opening a dozen browser tabs is not a filing system. One zip, named per
+    student and teller reference, is what a bursar can actually keep: it prints
+    in order, files in a folder, and survives an audit.
+
+    Pick exactly one scope: a day (the end-of-day pack), an invoice (one
+    family's instalments), or a term.
+    """
+    import zipfile
+    from datetime import date as _date
+
+    school_id = tenant_scope(user)
+    scopes = [s for s in (date, invoice_id, term_id) if s]
+    if len(scopes) != 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Choose one of: date, invoice_id or term_id")
+
+    stmt = select(Payment).where(Payment.school_id == school_id,
+                                 Payment.deleted_at.is_(None))
+    label = "receipts"
+
+    if date:
+        try:
+            day = _date.fromisoformat(date)
+        except ValueError:
+            raise HTTPException(status_code=400,
+                                detail="date must look like 2026-07-17")
+        stmt = stmt.where(Payment.paid_at == day)
+        label = f"receipts-{date}"
+    elif invoice_id:
+        inv = await db.get(Invoice, invoice_id)
+        if not inv or inv.school_id != school_id or inv.deleted_at:
+            raise HTTPException(status_code=404, detail="Invoice not found")
+        stmt = stmt.where(Payment.invoice_id == invoice_id)
+        label = f"receipts-{inv.invoice_number}"
+    else:
+        invoice_ids = (await db.execute(select(Invoice.id).where(
+            Invoice.school_id == school_id,
+            Invoice.term_id == term_id,
+            Invoice.deleted_at.is_(None)))).scalars().all()
+        if not invoice_ids:
+            raise HTTPException(status_code=404,
+                                detail="No invoices for that term")
+        stmt = stmt.where(Payment.invoice_id.in_(invoice_ids))
+        label = "receipts-term"
+
+    payments = (await db.execute(stmt)).scalars().all()
+    if not payments:
+        raise HTTPException(status_code=404,
+                            detail="No payments found for that selection")
+
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        seen: set[str] = set()
+        for pay in sorted(payments, key=lambda p: str(p.reference)):
+            fname, pdf = await _receipt_bytes_for(db, school_id, pay)
+            # two payments could share an admission+reference shape; keep both
+            base, n = fname, 2
+            while fname in seen:
+                fname = base.replace(".pdf", f"_{n}.pdf")
+                n += 1
+            seen.add(fname)
+            z.writestr(fname, pdf)
+
+    buf.seek(0)
+    return StreamingResponse(
+        buf, media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{label}.zip"'})

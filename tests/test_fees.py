@@ -350,3 +350,95 @@ async def test_invoice_payments_are_tenant_scoped(ctx):
     r = await client.get("/api/fees/invoices/not-a-real-invoice/payments",
                          headers=ah)
     assert r.status_code == 404
+
+
+async def _billed_with_instalments(client, ah, ids):
+    from app.models.academics import ClassArm
+    async with ids["session_factory"]() as db:
+        arm = await db.get(ClassArm, ids["arm_id"])
+        class_id = arm.class_id
+    cat = (await client.post("/api/fees/categories", headers=ah,
+           json={"name": "Fees"})).json()
+    await client.post("/api/fees/structures", headers=ah, json={
+        "class_id": class_id, "term_id": ids["term_id"],
+        "category_id": cat["id"], "amount": 60000})
+    await client.post("/api/fees/invoices/generate", headers=ah,
+                      json={"arm_id": ids["arm_id"], "term_id": ids["term_id"]})
+    invs = (await client.get("/api/fees/invoices", headers=ah,
+            params={"term_id": ids["term_id"]})).json()
+    await client.post("/api/fees/payments", headers=ah, json={
+        "invoice_id": invs[0]["id"], "amount": 25000, "method": "cash",
+        "reference": "T-101", "paid_at": "2026-07-17"})
+    await client.post("/api/fees/payments", headers=ah, json={
+        "invoice_id": invs[0]["id"], "amount": 35000, "method": "transfer",
+        "reference": "T-102", "paid_at": "2026-07-17"})
+    await client.post("/api/fees/payments", headers=ah, json={
+        "invoice_id": invs[1]["id"], "amount": 20000, "method": "cash",
+        "reference": "T-103", "paid_at": "2026-07-17"})
+    return invs
+
+
+async def test_a_receipt_can_be_viewed_or_downloaded(ctx):
+    client, ids = ctx
+    ah = await headers(client, "admin@gss-ikeja.ng", "admin123")
+    invs = await _billed_with_instalments(client, ah, ids)
+    pid = (await client.get(f"/api/fees/invoices/{invs[0]['id']}/payments",
+           headers=ah)).json()[0]["payment_id"]
+
+    view = await client.get(f"/api/fees/payments/{pid}/receipt", headers=ah)
+    assert view.status_code == 200
+    assert view.headers["content-disposition"].startswith("inline")
+
+    save = await client.get(f"/api/fees/payments/{pid}/receipt", headers=ah,
+                            params={"download": "true"})
+    assert save.status_code == 200
+    assert save.headers["content-disposition"].startswith("attachment")
+    assert save.content[:4] == b"%PDF"
+
+
+async def test_bulk_receipts_zip_by_day_and_by_invoice(ctx):
+    """A bursar's end-of-day pack, and one family's instalments — as files that
+    can actually be filed, not a dozen browser tabs."""
+    import io
+    import zipfile
+
+    client, ids = ctx
+    ah = await headers(client, "admin@gss-ikeja.ng", "admin123")
+    invs = await _billed_with_instalments(client, ah, ids)
+
+    day = await client.get("/api/fees/receipts.zip", headers=ah,
+                           params={"date": "2026-07-17"})
+    assert day.status_code == 200
+    assert day.headers["content-type"] == "application/zip"
+    assert "receipts-2026-07-17.zip" in day.headers["content-disposition"]
+    names = zipfile.ZipFile(io.BytesIO(day.content)).namelist()
+    assert len(names) == 3
+    # named by admission number + teller reference, so the pack files itself
+    assert any("T-101" in n and n.endswith(".pdf") for n in names)
+
+    one = await client.get("/api/fees/receipts.zip", headers=ah,
+                           params={"invoice_id": invs[0]["id"]})
+    assert one.status_code == 200
+    inner = zipfile.ZipFile(io.BytesIO(one.content))
+    assert len(inner.namelist()) == 2                  # both instalments
+    for n in inner.namelist():
+        assert inner.read(n)[:4] == b"%PDF"            # each really is a PDF
+
+
+async def test_bulk_receipts_guards_and_permissions(ctx):
+    client, ids = ctx
+    ah = await headers(client, "admin@gss-ikeja.ng", "admin123")
+    await _billed_with_instalments(client, ah, ids)
+
+    # exactly one scope is required
+    assert (await client.get("/api/fees/receipts.zip", headers=ah)).status_code == 400
+    assert (await client.get("/api/fees/receipts.zip", headers=ah, params={
+        "date": "2026-07-17", "term_id": ids["term_id"]})).status_code == 400
+    # a day with no money is a clean 404, not an empty zip
+    assert (await client.get("/api/fees/receipts.zip", headers=ah,
+            params={"date": "2020-01-01"})).status_code == 404
+
+    # teachers have no business with the school's takings
+    th = await headers(client, "teacher@gss-ikeja.ng", "teach123")
+    assert (await client.get("/api/fees/receipts.zip", headers=th,
+            params={"date": "2026-07-17"})).status_code == 403
