@@ -129,6 +129,28 @@ def build_receipt_pdf(data: dict) -> bytes:
 
     inv = data["invoice"]
     status = str(inv["status"]).split(".")[-1].upper()
+
+    # ---- what the fees are actually for ----
+    # A parent handed a receipt should see the bill itemised, not a bare total.
+    # These lines are the ones frozen when the invoice was issued, so they match
+    # what was billed even if the school later changes its fee structure.
+    items = data.get("items") or []
+    if items:
+        rows = [["FEES BILLED", ""]]
+        rows += [[i["name"], f"{i['amount']:,.2f}"] for i in items]
+        it = Table(rows, colWidths=[70 * mm, 40 * mm])
+        it.setStyle(TableStyle([
+            ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+            ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("TEXTCOLOR", (0, 0), (-1, 0), brand),
+            ("LINEBELOW", (0, 0), (-1, 0), 0.5, brand),
+            ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+        ]))
+        story.append(it)
+        story.append(Spacer(1, 6))
+
     totals = [
         ["Invoice amount", f"{inv['amount']:,.2f}"],
         ["Discount", f"{inv['discount']:,.2f}"],

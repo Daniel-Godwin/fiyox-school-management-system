@@ -36,6 +36,12 @@ class GenerateInvoicesIn(BaseModel):
     due_date: date | None = None
 
 
+class InvoiceLine(BaseModel):
+    """One billed category, frozen as at invoice generation."""
+    name: str
+    amount: float
+
+
 class InvoiceOut(BaseModel):
     id: str
     student_id: str
@@ -47,6 +53,7 @@ class InvoiceOut(BaseModel):
     balance: float
     status: InvoiceStatus
     due_date: date | None = None
+    items: list[InvoiceLine] = []
 
 
 class PaymentIn(BaseModel):

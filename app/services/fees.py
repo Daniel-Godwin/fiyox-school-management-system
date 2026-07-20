@@ -31,12 +31,22 @@ def status_for(amount: float, discount: float, paid: float) -> InvoiceStatus:
 
 async def invoice_view(db: AsyncSession, inv: Invoice) -> dict:
     paid = await paid_total(db, inv.id)
+
+    # the itemised bill, as frozen when the invoice was issued — parents see
+    # what they are paying for, not just a total
+    from app.models.fees import InvoiceItem
+    lines = (await db.execute(select(InvoiceItem).where(
+        InvoiceItem.invoice_id == inv.id,
+        InvoiceItem.deleted_at.is_(None)))).scalars().all()
+
     return {
         "id": inv.id, "student_id": inv.student_id, "term_id": inv.term_id,
         "invoice_number": inv.invoice_number, "amount": inv.amount,
         "discount": inv.discount, "paid": round(paid, 2),
         "balance": round(inv.amount - inv.discount - paid, 2),
         "status": inv.status, "due_date": inv.due_date,
+        "items": [{"name": l.category_name, "amount": l.amount}
+                  for l in sorted(lines, key=lambda x: (-x.amount, x.category_name))],
     }
 
 
@@ -50,12 +60,19 @@ async def generate_invoices(db: AsyncSession, school_id: str, user_id: str,
     if not arm or arm.school_id != school_id:
         return {"error": "arm not found"}
 
-    total = (await db.execute(select(func.coalesce(func.sum(FeeStructure.amount), 0.0))
-             .where(FeeStructure.school_id == school_id,
-                    FeeStructure.class_id == arm.class_id,
-                    FeeStructure.term_id == term_id))).scalar() or 0.0
+    structures = (await db.execute(select(FeeStructure).where(
+        FeeStructure.school_id == school_id,
+        FeeStructure.class_id == arm.class_id,
+        FeeStructure.term_id == term_id))).scalars().all()
+    total = float(sum(s.amount for s in structures))
     if total <= 0:
         return {"error": "no fee structure defined for this class and term"}
+
+    # category names are copied onto each invoice line, so a later rename or
+    # deletion cannot rewrite what a parent was billed
+    from app.models.fees import FeeCategory as _Cat, InvoiceItem as _Item
+    cat_names = {c.id: c.name for c in (await db.execute(select(_Cat).where(
+        _Cat.school_id == school_id))).scalars().all()}
 
     students = (await db.execute(select(Student).where(
         Student.school_id == school_id, Student.current_arm_id == arm_id,
@@ -79,6 +96,13 @@ async def generate_invoices(db: AsyncSession, school_id: str, user_id: str,
                       due_date=due_date, created_by=user_id)
         db.add(inv)
         await db.flush()
+
+        for s in structures:
+            db.add(_Item(school_id=school_id, invoice_id=inv.id,
+                         category_id=s.category_id,
+                         category_name=cat_names.get(s.category_id, "Fee"),
+                         amount=float(s.amount), created_by=user_id))
+
         await record_audit(db, school_id=school_id, user_id=user_id, action="create",
                            table_name="invoices", record_id=inv.id,
                            changes={"amount": {"old": None, "new": float(total)},

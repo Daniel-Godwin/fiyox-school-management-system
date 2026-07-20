@@ -12,6 +12,7 @@ from app.models.results import (
 )
 from app.models.audit import AuditLog
 from app.models.fees import (
+    InvoiceItem,
     FeeCategory, FeeStructure, Invoice, Payment, InvoiceStatus, PaymentMethod,
 )
 from app.models.attendance import Attendance, AttendanceStatus

@@ -6,7 +6,8 @@ import { useToast } from "@/components/Toast";
 
 type Term = { id: string; name: string; session: string; is_current: boolean };
 type Ward = { student_id: string; name: string; admission_number: string; class_label: string };
-type FeeView = { id: string; student_id: string; invoice_number: string; amount: number; paid: number; balance: number; status: string; can_pay_online?: boolean };
+type FeeLine = { name: string; amount: number };
+type FeeView = { id: string; student_id: string; invoice_number: string; amount: number; paid: number; balance: number; status: string; can_pay_online?: boolean; items?: FeeLine[] };
 type AttSummary = { days_recorded: number; present: number; absent: number; late: number; excused: number };
 type Report = { summary: { average: number; position: number; class_size: number; grand_total: number } };
 
@@ -291,6 +292,17 @@ export default function WardsPage() {
               <div className="rounded-md border border-line bg-paper p-3">
                 <p className="text-xs font-medium text-ink-soft mb-1">Fees</p>
                 {fee ? (
+                  <>
+                  {fee.items && fee.items.length > 0 && (
+                    <ul className="mb-2 text-xs text-ink-soft space-y-0.5">
+                      {fee.items.map((line, i) => (
+                        <li key={i} className="flex justify-between gap-4 max-w-xs">
+                          <span>{line.name}</span>
+                          <span className="tabular">{ngn(line.amount)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                   <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
                     <span>Invoice <b className="tabular">{fee.invoice_number}</b></span>
                     <span>Paid <b className="tabular">{ngn(fee.paid)}</b></span>
@@ -310,6 +322,7 @@ export default function WardsPage() {
                       </button>
                     )}
                   </div>
+                  </>
                 ) : (
                   <p className="text-sm text-ink-soft">No invoice for this term.</p>
                 )}

@@ -64,6 +64,22 @@ class Invoice(Base, UUIDMixin, TimestampMixin, TenantMixin):
     due_date: Mapped[date | None] = mapped_column(Date)
 
 
+class InvoiceItem(Base, UUIDMixin, TimestampMixin, TenantMixin):
+    """One line of an invoice: "Tuition — 30,000".
+
+    The category NAME is copied here, not just referenced, and the amount is
+    frozen at generation time. A school that renames "PTA Levy" or deletes a
+    category next session must not silently rewrite what a parent was billed
+    and paid last term — a receipt is evidence, and evidence does not change.
+    """
+    __tablename__ = "invoice_items"
+
+    invoice_id: Mapped[str] = mapped_column(ForeignKey("invoices.id"), index=True)
+    category_id: Mapped[str | None] = mapped_column(ForeignKey("fee_categories.id"))
+    category_name: Mapped[str] = mapped_column(String(100))
+    amount: Mapped[float] = mapped_column(Float, default=0.0)
+
+
 class Payment(Base, UUIDMixin, TimestampMixin, TenantMixin):
     """A received payment against an invoice. reference is the idempotency key."""
     __tablename__ = "payments"

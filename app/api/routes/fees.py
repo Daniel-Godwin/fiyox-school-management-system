@@ -139,6 +139,17 @@ async def pay(
 
 
 # ---------- Receipt PDF ----------
+async def _invoice_items(db, school_id: str, invoice_id: str) -> list[dict]:
+    """The billed breakdown for an invoice, as frozen when it was issued."""
+    from app.models.fees import InvoiceItem
+    rows = (await db.execute(select(InvoiceItem).where(
+        InvoiceItem.school_id == school_id,
+        InvoiceItem.invoice_id == invoice_id,
+        InvoiceItem.deleted_at.is_(None)))).scalars().all()
+    return [{"name": r.category_name, "amount": r.amount}
+            for r in sorted(rows, key=lambda x: (-x.amount, x.category_name))]
+
+
 @router.get("/payments/{payment_id}/receipt")
 async def payment_receipt(
     payment_id: str, db: DbDep, user: Annotated[User, FinanceRoles],
@@ -168,6 +179,7 @@ async def payment_receipt(
         "method": pay.method, "reference": pay.reference,
         "amount": pay.amount, "paid_at": pay.paid_at,
         "invoice": inv_view,
+        "items": await _invoice_items(db, school_id, inv.id) if inv else [],
         "received_by": f"{receiver.first_name} {receiver.last_name}" if receiver else None,
     })
     fname = f"receipt_{pay.reference}.pdf"
@@ -664,6 +676,7 @@ async def _receipt_bytes_for(db, school_id: str, pay: Payment) -> tuple[str, byt
         "method": pay.method, "reference": pay.reference,
         "amount": pay.amount, "paid_at": pay.paid_at,
         "invoice": inv_view,
+        "items": await _invoice_items(db, school_id, inv.id) if inv else [],
         "received_by": (f"{receiver.first_name} {receiver.last_name}"
                         if receiver else None),
     })

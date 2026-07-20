@@ -442,3 +442,129 @@ async def test_bulk_receipts_guards_and_permissions(ctx):
     th = await headers(client, "teacher@gss-ikeja.ng", "teach123")
     assert (await client.get("/api/fees/receipts.zip", headers=th,
             params={"date": "2026-07-17"})).status_code == 403
+
+
+async def test_invoices_carry_the_billed_breakdown(ctx):
+    """A parent should see what the money is for. The lines are snapshotted at
+    generation, so a later change to the school's fee structure can never
+    rewrite what was billed and paid."""
+    client, ids = ctx
+    ah = await headers(client, "admin@gss-ikeja.ng", "admin123")
+    from app.models.academics import ClassArm
+    async with ids["session_factory"]() as db:
+        arm = await db.get(ClassArm, ids["arm_id"])
+        class_id = arm.class_id
+
+    cats = {}
+    for name, amount in (("Tuition", 35000), ("PTA Levy", 3000),
+                         ("Examination", 5000)):
+        c = (await client.post("/api/fees/categories", headers=ah,
+             json={"name": name})).json()
+        cats[name] = c["id"]
+        await client.post("/api/fees/structures", headers=ah, json={
+            "class_id": class_id, "term_id": ids["term_id"],
+            "category_id": c["id"], "amount": amount})
+
+    await client.post("/api/fees/invoices/generate", headers=ah,
+                      json={"arm_id": ids["arm_id"], "term_id": ids["term_id"]})
+    inv = (await client.get("/api/fees/invoices", headers=ah,
+           params={"term_id": ids["term_id"]})).json()[0]
+
+    assert inv["amount"] == 43000
+    lines = {i["name"]: i["amount"] for i in inv["items"]}
+    assert lines == {"Tuition": 35000, "PTA Levy": 3000, "Examination": 5000}
+    # the lines add up to the invoice total — no silent gap
+    assert round(sum(lines.values()), 2) == inv["amount"]
+
+    # the parent sees the same breakdown in their portal
+    from app.core.security import hash_password
+    from app.models.school import Role, User
+    from app.models.student import Guardian
+    async with ids["session_factory"]() as db:
+        p = User(school_id=ids["school_id"], email="mum@fee.ng",
+                 hashed_password=hash_password("mum12345"), role=Role.PARENT,
+                 first_name="M", last_name="U")
+        db.add(p)
+        await db.flush()
+        db.add(Guardian(school_id=ids["school_id"], parent_user_id=p.id,
+                        student_id=inv["student_id"]))
+        await db.commit()
+    ph = await headers(client, "mum@fee.ng", "mum12345")
+    mine = (await client.get("/api/my/fees", headers=ph,
+            params={"term_id": ids["term_id"]})).json()
+    assert {i["name"] for i in mine[0]["items"]} == set(lines)
+
+
+async def test_changing_the_fee_structure_never_rewrites_an_issued_invoice(ctx):
+    """The evidence property: last term's receipt must not change because the
+    school renamed a category or raised a fee this term."""
+    client, ids = ctx
+    ah = await headers(client, "admin@gss-ikeja.ng", "admin123")
+    from app.models.academics import ClassArm
+    async with ids["session_factory"]() as db:
+        arm = await db.get(ClassArm, ids["arm_id"])
+        class_id = arm.class_id
+
+    cat = (await client.post("/api/fees/categories", headers=ah,
+           json={"name": "PTA Levy"})).json()
+    await client.post("/api/fees/structures", headers=ah, json={
+        "class_id": class_id, "term_id": ids["term_id"],
+        "category_id": cat["id"], "amount": 3000})
+    await client.post("/api/fees/invoices/generate", headers=ah,
+                      json={"arm_id": ids["arm_id"], "term_id": ids["term_id"]})
+    inv = (await client.get("/api/fees/invoices", headers=ah,
+           params={"term_id": ids["term_id"]})).json()[0]
+    assert inv["items"][0] == {"name": "PTA Levy", "amount": 3000}
+
+    # the school renames the category and raises the amount afterwards
+    from app.models.fees import FeeCategory, FeeStructure
+    from sqlalchemy import select as _select
+    async with ids["session_factory"]() as db:
+        c = await db.get(FeeCategory, cat["id"])
+        c.name = "Parents Association Levy (revised)"
+        s = (await db.execute(_select(FeeStructure).where(
+            FeeStructure.category_id == cat["id"]))).scalars().first()
+        s.amount = 9000
+        await db.commit()
+
+    # the already-issued invoice is untouched — name and amount as billed
+    after = (await client.get("/api/fees/invoices", headers=ah,
+             params={"term_id": ids["term_id"]})).json()[0]
+    assert after["items"][0] == {"name": "PTA Levy", "amount": 3000}
+    assert after["amount"] == 3000
+
+
+async def test_receipt_prints_for_an_invoice_with_no_line_items(ctx):
+    """Invoices issued before line items existed must still print a receipt —
+    the breakdown section simply doesn't appear."""
+    client, ids = ctx
+    ah = await headers(client, "admin@gss-ikeja.ng", "admin123")
+    from app.models.academics import ClassArm
+    from app.models.fees import InvoiceItem
+    from sqlalchemy import select as _select
+    async with ids["session_factory"]() as db:
+        arm = await db.get(ClassArm, ids["arm_id"])
+        class_id = arm.class_id
+    cat = (await client.post("/api/fees/categories", headers=ah,
+           json={"name": "Fees"})).json()
+    await client.post("/api/fees/structures", headers=ah, json={
+        "class_id": class_id, "term_id": ids["term_id"],
+        "category_id": cat["id"], "amount": 10000})
+    await client.post("/api/fees/invoices/generate", headers=ah,
+                      json={"arm_id": ids["arm_id"], "term_id": ids["term_id"]})
+    inv = (await client.get("/api/fees/invoices", headers=ah,
+           params={"term_id": ids["term_id"]})).json()[0]
+
+    # simulate a legacy invoice: strip its lines
+    async with ids["session_factory"]() as db:
+        for row in (await db.execute(_select(InvoiceItem).where(
+                InvoiceItem.invoice_id == inv["id"]))).scalars().all():
+            await db.delete(row)
+        await db.commit()
+
+    pay = (await client.post("/api/fees/payments", headers=ah, json={
+        "invoice_id": inv["id"], "amount": 10000, "method": "cash",
+        "reference": "LEGACY-1", "paid_at": "2026-07-17"})).json()
+    pid = pay.get("payment_id") or pay.get("id")
+    r = await client.get(f"/api/fees/payments/{pid}/receipt", headers=ah)
+    assert r.status_code == 200 and r.content[:4] == b"%PDF"
