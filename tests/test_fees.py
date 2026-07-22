@@ -669,10 +669,15 @@ async def test_backfill_refuses_to_invent_a_breakdown_that_contradicts_the_bill(
     assert r["left_alone"][0]["structures_total"] == 50000
     assert "changed" in r["left_alone"][0]["reason"]
 
-    # the invoices are untouched: still no breakdown, amounts intact
+    # the backfill STORED nothing (its safety rule), though the receipt still
+    # shows a reconciled breakdown by default via derivation
+    from sqlalchemy import select as _sel2
+    from app.models.fees import InvoiceItem as _II
+    async with ids["session_factory"]() as db:
+        assert (await db.execute(_sel2(_II))).scalars().first() is None
     invs = (await client.get("/api/fees/invoices", headers=ah,
             params={"term_id": ids["term_id"]})).json()
-    assert all(i["items"] == [] and i["amount"] == 20000 for i in invs)
+    assert all(i["amount"] == 20000 for i in invs)
 
 
 async def test_backfill_is_admin_only(ctx):
@@ -732,9 +737,10 @@ async def test_breakdown_is_derived_for_invoices_that_have_no_stored_lines(ctx):
     assert pdf.status_code == 200 and pdf.content[:4] == b"%PDF"
 
 
-async def test_derivation_refuses_when_the_bill_and_structures_disagree(ctx):
-    """If the school changed its fees after issuing an invoice, no breakdown is
-    shown — better a plain receipt than one that contradicts what was paid."""
+async def test_derivation_reconciles_when_the_bill_and_structures_disagree(ctx):
+    """When the school changed its fees after billing, the breakdown is still
+    shown by default: the categories are listed and the difference to what was
+    billed is reconciled as one explicit line, so the lines always add up."""
     from sqlalchemy import select as _select
     from app.models.fees import FeeStructure, InvoiceItem
 
@@ -762,7 +768,13 @@ async def test_derivation_refuses_when_the_bill_and_structures_disagree(ctx):
     inv = (await client.get("/api/fees/invoices", headers=ah,
            params={"term_id": ids["term_id"]})).json()[0]
     assert inv["amount"] == 20000
-    assert inv["items"] == []                 # no invented breakdown
+    # the breakdown is now shown BY DEFAULT: the category is listed and the
+    # gap to what was billed is reconciled as an explicit, honest line, so the
+    # lines still add up to the amount billed
+    names = {i["name"]: i["amount"] for i in inv["items"]}
+    assert names.get("Tuition") == 50000
+    assert "Discount applied" in names          # 20000 billed - 50000 = -30000
+    assert round(sum(i["amount"] for i in inv["items"]), 2) == 20000
 
 
 async def test_stored_lines_always_win_over_derivation(ctx):

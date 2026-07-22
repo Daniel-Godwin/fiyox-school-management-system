@@ -30,20 +30,22 @@ def status_for(amount: float, discount: float, paid: float) -> InvoiceStatus:
 
 
 async def invoice_breakdown(db: AsyncSession, inv: Invoice) -> list[dict]:
-    """What an invoice's total is made up of.
+    """What an invoice's total is made up of, shown by default.
 
-    Two sources, in order of trust:
+    Order of trust:
 
     1. **Stored lines** (`invoice_items`) — snapshotted when the invoice was
-       issued. Authoritative: they are what the parent was actually billed.
-    2. **Derived from the current fee structures** — for invoices issued before
-       Fiyox stored lines. Only used when those structures add up to *exactly*
-       the amount on the invoice. If the school has changed its fees since, the
-       sums disagree and we return nothing rather than print a breakdown that
-       contradicts the bill. A false receipt is worse than a plain one.
+       issued. Authoritative: exactly what the parent was billed.
+    2. **Derived from the class's fee categories** — for invoices issued before
+       Fiyox stored lines. The categories and amounts set up for the student's
+       class and term ARE the breakdown.
 
-    This means older receipts show their breakdown automatically wherever it
-    can be established safely, with no migration step for the school.
+    A parent should always see what the fees are for. So when the categories do
+    not add up to the exact invoice total — because of a discount, a rounding,
+    or a fee edited after billing — we do not throw the whole breakdown away.
+    We show the categories AND reconcile the gap as one honest line
+    ("Discount applied" when the bill is lower, "Other / adjustment" when it is
+    higher), so the lines always sum to the amount actually billed.
     """
     from app.models.fees import FeeCategory, FeeStructure, InvoiceItem
 
@@ -55,9 +57,8 @@ async def invoice_breakdown(db: AsyncSession, inv: Invoice) -> list[dict]:
                 for r in sorted(stored, key=lambda x: (-x.amount, x.category_name))]
 
     student = await db.get(Student, inv.student_id)
-    if not student or not student.current_arm_id:
-        return []
-    arm = await db.get(ClassArm, student.current_arm_id)
+    arm = (await db.get(ClassArm, student.current_arm_id)
+           if student and student.current_arm_id else None)
     if not arm:
         return []
 
@@ -67,15 +68,24 @@ async def invoice_breakdown(db: AsyncSession, inv: Invoice) -> list[dict]:
         FeeStructure.term_id == inv.term_id))).scalars().all()
     if not structures:
         return []
-    total = round(float(sum(s.amount for s in structures)), 2)
-    if total != round(float(inv.amount), 2):
-        return []          # the bill and the current structures disagree
 
     names = {c.id: c.name for c in (await db.execute(select(FeeCategory).where(
         FeeCategory.school_id == inv.school_id))).scalars().all()}
     lines = [{"name": names.get(s.category_id, "Fee"), "amount": float(s.amount)}
-             for s in structures]
-    return sorted(lines, key=lambda x: (-x["amount"], x["name"]))
+             for s in structures if float(s.amount) != 0]
+    lines.sort(key=lambda x: (-x["amount"], x["name"]))
+
+    # reconcile the categories to the amount actually billed, so the breakdown
+    # always adds up — a discount or a later fee tweak becomes its own line
+    billed = round(float(inv.amount), 2)
+    cat_total = round(sum(l["amount"] for l in lines), 2)
+    diff = round(billed - cat_total, 2)
+    if diff < 0:
+        lines.append({"name": "Discount applied", "amount": diff})
+    elif diff > 0:
+        lines.append({"name": "Other / adjustment", "amount": diff})
+
+    return lines
 
 
 async def invoice_view(db: AsyncSession, inv: Invoice) -> dict:
