@@ -22,6 +22,7 @@ from app.models.verification import VerificationCode, VerifyChannel, VerifyPurpo
 from app.models.notifications import (
     MessageLog, Channel, MessageStatus, MessagePurpose,
 )
+from app.models.demo import DemoRequest
 
 __all__ = [
     "Base", "School", "User", "Role", "DEFAULT_GRADING",

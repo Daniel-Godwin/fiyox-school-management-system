@@ -11,6 +11,11 @@ type SchoolRow = {
   created_at: string | null;
 };
 
+type DemoReq = {
+  id: string; school_name: string; contact_name: string; email: string;
+  phone: string | null; message: string | null; handled: boolean; created_at: string;
+};
+
 function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
 }
@@ -26,6 +31,22 @@ export default function SchoolsConsole() {
   });
   // shown exactly once after creation — the credentials you hand to the school
   const [handover, setHandover] = useState<{ school: string; email: string; password: string } | null>(null);
+
+  const [demoReqs, setDemoReqs] = useState<DemoReq[] | null>(null);
+
+  const loadDemos = useCallback(async () => {
+    try { setDemoReqs(await api<DemoReq[]>("/api/demo-requests")); }
+    catch { /* non-fatal */ }
+  }, []);
+  useEffect(() => { loadDemos(); }, [loadDemos]);
+
+  async function toggleHandled(r: DemoReq) {
+    setBusy(true);
+    try {
+      await api(`/api/demo-requests/${r.id}?handled=${!r.handled}`, { method: "PATCH" });
+      await loadDemos();
+    } catch { /* non-fatal */ } finally { setBusy(false); }
+  }
 
   const load = useCallback(async () => {
     try { setSchools(await api<SchoolRow[]>("/api/schools")); }
@@ -234,6 +255,40 @@ export default function SchoolsConsole() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+      </section>
+
+      {/* demo requests from the landing page */}
+      <section className="space-y-2">
+        <h2 className="text-sm font-semibold text-ink-soft uppercase tracking-wide">
+          Demo requests {demoReqs ? `(${demoReqs.filter((d) => !d.handled).length} new)` : ""}
+        </h2>
+        {demoReqs && demoReqs.length === 0 && (
+          <p className="text-sm text-ink-soft">No demo requests yet.</p>
+        )}
+        {demoReqs && demoReqs.length > 0 && (
+          <div className="space-y-2">
+            {demoReqs.map((r) => (
+              <div key={r.id}
+                   className={`rounded-lg border p-3 ${r.handled ? "border-line bg-paper/50 opacity-70" : "border-brass/40 bg-brass/5"}`}>
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <div className="font-medium">
+                    {r.school_name}
+                    <span className="ml-2 text-xs font-normal text-ink-soft">{r.created_at}</span>
+                  </div>
+                  <button onClick={() => toggleHandled(r)} disabled={busy}
+                          className="text-xs underline underline-offset-2 text-ink-soft hover:text-ink disabled:opacity-50">
+                    {r.handled ? "Mark as new" : "Mark handled"}
+                  </button>
+                </div>
+                <div className="mt-1 text-sm">
+                  {r.contact_name} · <a href={`mailto:${r.email}`} className="text-ink underline underline-offset-2">{r.email}</a>
+                  {r.phone ? ` · ${r.phone}` : ""}
+                </div>
+                {r.message && <p className="mt-1 text-sm text-ink-soft">{r.message}</p>}
+              </div>
+            ))}
           </div>
         )}
       </section>

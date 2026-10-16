@@ -4,12 +4,12 @@
   /* Fiyox palette — ink navy authority, chalk-paper ground, ledger money-green */
   --color-ink: #0b1f3a;
   --color-ink-soft: #274264;
-  --color-paper: #f6f7f4;
+  --color-paper: #f3f4f6;        /* neutral light grey ground (was warm off-white) */
   --color-card: #ffffff;
   --color-ledger: #1e7a4f;
   --color-sanction: #b4232a;
   --color-brass: #c8a24b;
-  --color-line: #dfe3da;
+  --color-line: #e5e7eb;         /* cool neutral hairline to match the grey ground */
 
   --font-display: "Montserrat", system-ui, sans-serif;
   --font-body: "Montserrat", system-ui, sans-serif;
