@@ -48,8 +48,8 @@ export default function Landing() {
     <div className="min-h-screen bg-paper text-ink">
       {/* top bar */}
       <header className="sticky top-0 z-40 border-b border-white/10 bg-ink text-white">
-        <div className="mx-auto max-w-6xl flex items-center justify-between px-5 h-14">
-          <img src="/fiyox-logo-white.png" alt="Fiyox" style={{ height: 30, width: "auto" }} />
+        <div className="mx-auto max-w-6xl flex items-center justify-between px-5 py-3">
+          <img src="/fiyox-logo-white.png" alt="Fiyox" style={{ height: "clamp(72px, 9vw, 120px)", width: "auto" }} />
           <nav className="flex items-center gap-5 text-sm">
             <a href="#features" className="hidden sm:inline text-white/75 hover:text-white">What it does</a>
             <a href="#demo" className="hidden sm:inline text-white/75 hover:text-white">Request a demo</a>
