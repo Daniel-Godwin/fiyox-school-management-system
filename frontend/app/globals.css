@@ -48,7 +48,11 @@ html, body {
   overflow-x: hidden;
 }
 * { min-width: 0; }
-img, svg, video, canvas { max-width: 100%; height: auto; }
+/* Keep media responsive, but do it in @layer base so Tailwind height/width
+   utilities (h-7, h-8…) still win — an unlayered rule here would override them. */
+@layer base {
+  img, svg, video, canvas { max-width: 100%; height: auto; }
+}
 
 h1, h2, h3, .display {
   font-family: var(--font-display);

@@ -92,7 +92,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <div className="min-h-screen md:grid md:grid-cols-[230px_1fr]">
       {/* ---- phone/tablet top bar ---- */}
       <header className="md:hidden sticky top-0 z-40 flex items-center justify-between bg-ink text-white px-4 py-3">
-        <span className="display text-lg font-bold">Fiyox</span>
+        <img src="/fiyox-logo-white.png" alt="Fiyox" style={{ height: 26, width: "auto" }} />
         <button
           onClick={() => setMenuOpen((o) => !o)}
           aria-label={menuOpen ? "Close menu" : "Open menu"}
@@ -131,7 +131,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       {/* ---- desktop sidebar ---- */}
       <aside className="hidden md:flex bg-ink text-white flex-col py-6">
         <div className="px-5 mb-8">
-          <span className="display text-xl font-bold">Fiyox</span>
+          <img src="/fiyox-logo-white.png" alt="Fiyox" style={{ height: 34, width: "auto" }} />
         </div>
         <nav className="flex flex-col gap-1 px-3">{navLinks}</nav>
         <div className="mt-auto px-5 pt-6">

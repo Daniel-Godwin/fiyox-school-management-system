@@ -33,7 +33,7 @@ export default function LoginPage() {
           <p className="text-brass text-[11px] tracking-[0.25em] uppercase">
             School register
           </p>
-          <h1 className="text-3xl font-semibold mt-1">Fiyox</h1>
+          <img src="/fiyox-logo-white.png" alt="Fiyox School Management System" className="mt-1" style={{ height: 50, width: "auto" }} />
           <p className="text-white/70 text-sm mt-1">
             Results · Fees · Attendance
           </p>

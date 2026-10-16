@@ -49,7 +49,7 @@ export default function Landing() {
       {/* top bar */}
       <header className="sticky top-0 z-40 border-b border-white/10 bg-ink text-white">
         <div className="mx-auto max-w-6xl flex items-center justify-between px-5 h-14">
-          <span className="text-xl font-extrabold tracking-tight">Fiyox</span>
+          <img src="/fiyox-logo-white.png" alt="Fiyox" style={{ height: 30, width: "auto" }} />
           <nav className="flex items-center gap-5 text-sm">
             <a href="#features" className="hidden sm:inline text-white/75 hover:text-white">What it does</a>
             <a href="#demo" className="hidden sm:inline text-white/75 hover:text-white">Request a demo</a>
@@ -197,7 +197,7 @@ export default function Landing() {
       {/* footer */}
       <footer className="bg-ink text-white/70">
         <div className="mx-auto max-w-6xl px-5 py-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-sm">
-          <span className="font-extrabold text-white text-lg">Fiyox</span>
+          <img src="/fiyox-logo-white.png" alt="Fiyox" style={{ height: 30, width: "auto" }} />
           <span>School management for Nigerian secondary schools.</span>
           <Link href="/login" className="text-brass hover:underline">Sign in</Link>
         </div>
