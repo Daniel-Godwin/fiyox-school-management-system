@@ -20,6 +20,12 @@ type PaymentRow = {
   payment_id: string; reference: string; receipt_number: string;
   amount: number; method: string; paid_at: string | null; recorded_by: string;
 };
+type Debtor = {
+  student_id: string; admission_number: string; name: string; class: string;
+  outstanding: number; terms_owing: number; oldest_due: string | null;
+  days_overdue: number | null; guardian_name: string; guardian_phone: string;
+};
+type DebtorsResult = { count: number; total_outstanding: number; debtors: Debtor[] };
 type Recon = {
   date: string; payments: ReconRow[];
   by_method: { method: string; count: number; total: number }[];
@@ -44,6 +50,9 @@ export default function FeesPage() {
   const [reconDate, setReconDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [recon, setRecon] = useState<Recon | null>(null);
   const [reconBusy, setReconBusy] = useState(false);
+  const [debtors, setDebtors] = useState<DebtorsResult | null>(null);
+  const [debtorArm, setDebtorArm] = useState("");
+  const [debtorTermScope, setDebtorTermScope] = useState<"all" | "current">("all");
 
   const [arms, setArms] = useState<Arm[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
@@ -388,6 +397,31 @@ export default function FeesPage() {
     { label: "Outstanding", value: ngn(summary.outstanding) },
     { label: "Collection rate", value: `${summary.collection_rate}%` },
   ];
+
+  const debtorQuery = useCallback(() => {
+    const p = new URLSearchParams();
+    if (debtorArm) p.set("arm_id", debtorArm);
+    if (debtorTermScope === "current" && termId) p.set("term_id", termId);
+    return p.toString();
+  }, [debtorArm, debtorTermScope, termId]);
+
+  async function loadDebtors() {
+    setBusy("debtors"); setNotice(null);
+    try {
+      setDebtors(await api<DebtorsResult>(`/api/fees/debtors?${debtorQuery()}`));
+    } catch (e) {
+      setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not load the debtors list." });
+    } finally { setBusy(null); }
+  }
+
+  async function downloadDebtors() {
+    setBusy("debtors-xlsx"); setNotice(null);
+    try {
+      await downloadFile(`/api/fees/debtors.xlsx?${debtorQuery()}`, "debtors.xlsx");
+    } catch (e) {
+      setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not build the Excel file." });
+    } finally { setBusy(null); }
+  }
 
   async function loadRecon() {
     setReconBusy(true);
@@ -780,6 +814,96 @@ export default function FeesPage() {
           )}
         </section>
       )}
+
+      {/* debtors: who owes, how much, how long */}
+      <section className="rounded-lg border border-line bg-card p-4 space-y-3">
+        <div>
+          <h2 className="text-sm font-medium">Fee debtors</h2>
+          <p className="text-xs text-ink-soft mt-0.5">
+            Every student with an outstanding balance, most owed first. Balances
+            are summed live across terms — issued receipts never change.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="block">
+            <span className="block text-xs font-medium text-ink-soft mb-1">Class</span>
+            <select value={debtorArm} onChange={(e) => setDebtorArm(e.target.value)}
+                    className="rounded border border-line px-2 py-1.5 text-sm">
+              <option value="">All classes</option>
+              {arms.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+            </select>
+          </label>
+          <label className="block">
+            <span className="block text-xs font-medium text-ink-soft mb-1">Scope</span>
+            <select value={debtorTermScope}
+                    onChange={(e) => setDebtorTermScope(e.target.value as "all" | "current")}
+                    className="rounded border border-line px-2 py-1.5 text-sm">
+              <option value="all">All terms</option>
+              <option value="current">Selected term only</option>
+            </select>
+          </label>
+          <button onClick={loadDebtors} disabled={busy !== null}
+                  className="rounded-md border border-ink text-ink px-4 py-2 text-sm font-medium hover:bg-ink hover:text-white disabled:opacity-40">
+            {busy === "debtors" ? "Loading…" : "Show debtors"}
+          </button>
+          {debtors && debtors.count > 0 && (
+            <button onClick={downloadDebtors} disabled={busy !== null}
+                    className="rounded-md border border-line px-4 py-2 text-sm font-medium hover:border-ink disabled:opacity-40">
+              {busy === "debtors-xlsx" ? "Preparing…" : "Download Excel"}
+            </button>
+          )}
+          {debtors && (
+            <span className="text-sm text-ink-soft pb-2">
+              {debtors.count} debtor{debtors.count === 1 ? "" : "s"} ·
+              &nbsp;owed <b className="tabular text-sanction">₦{debtors.total_outstanding.toLocaleString()}</b>
+            </span>
+          )}
+        </div>
+
+        {debtors && debtors.count === 0 && (
+          <p className="text-sm text-ledger">No outstanding fees for this selection — everyone is paid up.</p>
+        )}
+
+        {debtors && debtors.count > 0 && (
+          <div className="overflow-x-auto rounded-lg border border-line">
+            <table className="min-w-[720px] w-full text-sm">
+              <thead>
+                <tr className="bg-ink text-white text-left">
+                  <th className="px-3 py-2 font-medium">Student</th>
+                  <th className="px-3 py-2 font-medium">Class</th>
+                  <th className="px-3 py-2 font-medium">Guardian</th>
+                  <th className="px-3 py-2 font-medium">Phone</th>
+                  <th className="px-3 py-2 font-medium text-right">Terms</th>
+                  <th className="px-3 py-2 font-medium text-right">Days overdue</th>
+                  <th className="px-3 py-2 font-medium text-right">Outstanding</th>
+                </tr>
+              </thead>
+              <tbody>
+                {debtors.debtors.map((d, i) => (
+                  <tr key={d.student_id} className={i % 2 ? "bg-paper/50" : ""}>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <span className="tabular text-ink-soft mr-2">{d.admission_number}</span>{d.name}
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap">{d.class}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{d.guardian_name || "—"}</td>
+                    <td className="px-3 py-2 whitespace-nowrap tabular">{d.guardian_phone || "—"}</td>
+                    <td className="px-3 py-2 text-right tabular">{d.terms_owing}</td>
+                    <td className="px-3 py-2 text-right tabular">
+                      {d.days_overdue === null ? "—" : (
+                        <span className={d.days_overdue > 30 ? "text-sanction font-medium" : ""}>{d.days_overdue}</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular font-medium text-sanction">
+                      ₦{d.outstanding.toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       {/* end-of-day reconciliation: paper vs system */}
       <section className="rounded-lg border border-line bg-card p-4 space-y-3">

@@ -864,3 +864,160 @@ async def backfill_invoice_items(
                  "Preview only — nothing was written." if not commit else
                  "Nothing to do."),
     }
+
+
+# ---------- Debtors (who owes, how much, how long) ----------
+async def _debtor_rows(db, school_id: str, term_id: str | None, arm_id: str | None):
+    """Per-student outstanding balance, summed across every unpaid invoice in
+    scope. Balances are added up live from invoices and payments — nothing is
+    copied onto a new invoice, so issued receipts never change."""
+    from datetime import date as _date
+    from app.models.academics import ClassArm, SchoolClass, Term
+    from app.models.student import Guardian
+
+    stmt = select(Invoice).where(Invoice.school_id == school_id,
+                                 Invoice.deleted_at.is_(None))
+    if term_id:
+        stmt = stmt.where(Invoice.term_id == term_id)
+    invoices = (await db.execute(stmt)).scalars().all()
+
+    students = {s.id: s for s in (await db.execute(select(Student).where(
+        Student.school_id == school_id,
+        Student.deleted_at.is_(None)))).scalars().all()}
+    arms = {a.id: a for a in (await db.execute(select(ClassArm).where(
+        ClassArm.school_id == school_id))).scalars().all()}
+    classes = {c.id: c.name for c in (await db.execute(select(SchoolClass).where(
+        SchoolClass.school_id == school_id))).scalars().all()}
+    terms = {t.id: t for t in (await db.execute(select(Term).where(
+        Term.school_id == school_id))).scalars().all()}
+
+    # first guardian (with a phone, if any) per student
+    guardians = (await db.execute(select(Guardian).where(
+        Guardian.school_id == school_id))).scalars().all()
+    parent_ids = {g.parent_user_id for g in guardians}
+    parents = {u.id: u for u in (await db.execute(select(User).where(
+        User.id.in_(parent_ids)))).scalars().all()} if parent_ids else {}
+    by_student_guardian: dict[str, User] = {}
+    for g in guardians:
+        p = parents.get(g.parent_user_id)
+        if not p:
+            continue
+        cur = by_student_guardian.get(g.student_id)
+        if cur is None or (not cur.phone and p.phone):
+            by_student_guardian[g.student_id] = p
+
+    def term_label(tid):
+        t = terms.get(tid)
+        return f"{str(t.name).split('.')[-1].title()} term" if t else ""
+
+    agg: dict[str, dict] = {}
+    for inv in invoices:
+        st = students.get(inv.student_id)
+        if not st:
+            continue
+        if arm_id and st.current_arm_id != arm_id:
+            continue
+        due = round(inv.amount - inv.discount, 2)
+        paid = await paid_total(db, inv.id)
+        balance = round(due - paid, 2)
+        if balance <= 0:
+            continue
+        row = agg.setdefault(st.id, {
+            "student_id": st.id,
+            "admission_number": st.admission_number,
+            "name": f"{st.first_name} {st.last_name}",
+            "class": (lambda a: f"{classes.get(a.class_id, '')} {a.name}".strip()
+                      if a else "")(arms.get(st.current_arm_id)),
+            "outstanding": 0.0,
+            "terms": [],
+            "oldest_due": None,
+        })
+        row["outstanding"] = round(row["outstanding"] + balance, 2)
+        row["terms"].append({"term": term_label(inv.term_id),
+                             "invoice_number": inv.invoice_number,
+                             "balance": balance,
+                             "due_date": str(inv.due_date) if inv.due_date else None})
+        if inv.due_date:
+            if row["oldest_due"] is None or str(inv.due_date) < row["oldest_due"]:
+                row["oldest_due"] = str(inv.due_date)
+
+    today = _date.today()
+    rows = []
+    for r in agg.values():
+        if r["oldest_due"]:
+            try:
+                r["days_overdue"] = max(0, (today - _date.fromisoformat(r["oldest_due"])).days)
+            except ValueError:
+                r["days_overdue"] = None
+        else:
+            r["days_overdue"] = None
+        g = by_student_guardian.get(r["student_id"])
+        r["guardian_name"] = f"{g.first_name} {g.last_name}" if g else ""
+        r["guardian_phone"] = (g.phone if g else "") or ""
+        r["terms_owing"] = len(r["terms"])
+        rows.append(r)
+
+    rows.sort(key=lambda r: -r["outstanding"])
+    return rows
+
+
+@router.get("/debtors")
+async def list_debtors(
+    db: DbDep, user: Annotated[User, FinanceRoles],
+    term_id: str | None = Query(None, description="one term, or all terms if omitted"),
+    arm_id: str | None = Query(None, description="restrict to one class arm"),
+):
+    """Every student who owes fees, most owed first — with the guardian's phone
+    and how long the oldest debt has been due. Totals are summed live across
+    all terms in scope."""
+    school_id = tenant_scope(user)
+    rows = await _debtor_rows(db, school_id, term_id, arm_id)
+    return {
+        "count": len(rows),
+        "total_outstanding": round(sum(r["outstanding"] for r in rows), 2),
+        "debtors": rows,
+    }
+
+
+@router.get("/debtors.xlsx")
+async def export_debtors(
+    db: DbDep, user: Annotated[User, FinanceRoles],
+    term_id: str | None = Query(None), arm_id: str | None = Query(None),
+):
+    """The debtors list as an Excel file the bursar can print or send."""
+    from datetime import datetime, timezone
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+
+    school_id = tenant_scope(user)
+    rows = await _debtor_rows(db, school_id, term_id, arm_id)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Debtors"
+    headers = ["Admission No", "Student", "Class", "Guardian", "Phone",
+               "Terms owing", "Oldest due", "Days overdue", "Outstanding (NGN)"]
+    ws.append(headers)
+    for cell in ws[1]:
+        cell.fill = PatternFill("solid", fgColor="1D3557")
+        cell.font = Font(color="FFFFFF", bold=True)
+    for r in rows:
+        ws.append([r["admission_number"], r["name"], r["class"],
+                   r["guardian_name"], r["guardian_phone"], r["terms_owing"],
+                   r["oldest_due"] or "", r["days_overdue"] if r["days_overdue"] is not None else "",
+                   r["outstanding"]])
+    ws.append([])
+    ws.append(["", "", "", "", "", "", "", "TOTAL",
+               round(sum(r["outstanding"] for r in rows), 2)])
+    for idx, h in enumerate(headers, 1):
+        longest = max([len(h)] + [len(str(r.get(k, ""))) for r in rows
+                      for k in ["admission_number", "name"]][:1] + [14])
+        ws.column_dimensions[chr(64 + idx)].width = min(max(longest + 2, 12), 32)
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return StreamingResponse(
+        buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="debtors-{stamp}.xlsx"'})
