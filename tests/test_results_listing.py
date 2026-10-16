@@ -36,7 +36,7 @@ async def test_bulk_publish_flips_all_and_is_idempotent(ctx):
 
     res = (await client.post("/api/results/publish", headers=h, json={
         "arm_id": ids["arm_id"], "term_id": ids["term_id"]})).json()
-    assert res == {"published": 3, "already_published": 0}
+    assert res["published"] == 3 and res["already_published"] == 0
 
     rows = (await client.get("/api/results", headers=h, params={
         "arm_id": ids["arm_id"], "term_id": ids["term_id"]})).json()
@@ -45,7 +45,7 @@ async def test_bulk_publish_flips_all_and_is_idempotent(ctx):
     # re-running publishes nothing new (no duplicate audit noise)
     again = (await client.post("/api/results/publish", headers=h, json={
         "arm_id": ids["arm_id"], "term_id": ids["term_id"]})).json()
-    assert again == {"published": 0, "already_published": 3}
+    assert again["published"] == 0 and again["already_published"] == 3
 
     logs = (await client.get("/api/audit-logs", headers=h,
             params={"table_name": "term_results"})).json()

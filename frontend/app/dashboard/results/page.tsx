@@ -18,6 +18,8 @@ type Row = {
   position: number;
   class_size: number;
   is_published: boolean;
+  approval_status: "draft" | "submitted" | "approved";
+  approval_note: string;
 };
 
 const ordinal = (n: number) =>
@@ -34,6 +36,7 @@ export default function ResultsPage() {
   const [editing, setEditing] = useState<string | null>(null);   // term_result_id
   const [draft, setDraft] = useState({ teacher: "", principal: "" });
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [approvalOn, setApprovalOn] = useState(false);
 
   useEffect(() => {
     Promise.all([me(), api<Term[]>("/api/academics/terms"), api<Arm[]>("/api/academics/arms")])
@@ -45,6 +48,10 @@ export default function ResultsPage() {
         if (current) setTermId(current.id);
       })
       .catch(() => setNotice({ kind: "err", text: "Could not load class lists. Is the backend running?" }));
+    // does this school route results through the approval gate?
+    api<{ result_approval_required: boolean }>("/api/schools/me")
+      .then((s) => setApprovalOn(!!s.result_approval_required))
+      .catch(() => setApprovalOn(false));
   }, []);
 
   const ready = termId && armId;
@@ -88,19 +95,52 @@ export default function ResultsPage() {
     }
   }
 
+  async function workflow(action: "submit" | "approve", label: string) {
+    setBusy(action);
+    setNotice(null);
+    try {
+      const res = await api<{ submitted?: number; approved?: number; note: string }>(
+        `/api/results/${action}`,
+        { method: "POST", body: JSON.stringify({ arm_id: armId, term_id: termId }) });
+      setNotice({ kind: "ok", text: res.note });
+      await load();
+    } catch {
+      setNotice({ kind: "err", text: `Could not ${label}.` });
+    } finally { setBusy(null); }
+  }
+
+  async function returnToTeacher() {
+    const reason = window.prompt(
+      "Return these results to the form teacher. What needs correcting?");
+    if (reason === null) return;
+    setBusy("return");
+    setNotice(null);
+    try {
+      const res = await api<{ returned: number; note: string }>(
+        `/api/results/return?arm_id=${armId}&term_id=${termId}`,
+        { method: "POST", body: JSON.stringify({ form_teacher_comment: reason }) });
+      setNotice({ kind: "ok", text: res.note });
+      await load();
+    } catch {
+      setNotice({ kind: "err", text: "Could not return the results." });
+    } finally { setBusy(null); }
+  }
+
   async function publishAll() {
     setBusy("publish");
     setNotice(null);
     try {
-      const res = await api<{ published: number; already_published: number }>(
+      const res = await api<{ published: number; already_published: number; blocked_unapproved: number; note?: string }>(
         "/api/results/publish",
         { method: "POST", body: JSON.stringify({ arm_id: armId, term_id: termId }) },
       );
       setNotice({
-        kind: "ok",
+        kind: res.published > 0 || res.already_published > 0 ? "ok" : "err",
         text: res.published > 0
           ? `Published ${res.published} result${res.published === 1 ? "" : "s"}. Parents and students can now view them.`
-          : "Everything here is already published.",
+          : res.note
+            ? res.note
+            : "Everything here is already published.",
       });
       await load();
     } catch {
@@ -150,6 +190,13 @@ export default function ResultsPage() {
   }
 
   const unpublished = rows?.filter((r) => !r.is_published).length ?? 0;
+  // the arm moves through the workflow together; derive one status for the controls
+  const hasRows = !!rows && rows.length > 0;
+  const anyDraft = rows?.some((r) => r.approval_status === "draft") ?? false;
+  const anySubmitted = rows?.some((r) => r.approval_status === "submitted") ?? false;
+  const anyApprovedUnpublished =
+    rows?.some((r) => r.approval_status === "approved" && !r.is_published) ?? false;
+  const returnNote = rows?.find((r) => r.approval_status === "draft" && r.approval_note)?.approval_note ?? "";
 
   return (
     <div className="space-y-5">
@@ -194,17 +241,47 @@ export default function ResultsPage() {
         <>
           <div className="flex flex-wrap items-center gap-3">
             {isAdmin && (
+              <button onClick={compute} disabled={busy !== null}
+                      className="rounded-md bg-ink text-white px-4 py-2 text-sm font-medium hover:bg-ink-soft disabled:opacity-50">
+                {busy === "compute" ? "Computing…" : "Compute results"}
+              </button>
+            )}
+
+            {/* ---- approval gate ON: submit -> approve -> publish ---- */}
+            {approvalOn && hasRows && anyDraft && (
+              <button onClick={() => workflow("submit", "submit for approval")}
+                      disabled={busy !== null}
+                      className="rounded-md bg-brass text-white px-4 py-2 text-sm font-medium hover:opacity-90 disabled:opacity-50">
+                {busy === "submit" ? "Submitting…" : "Submit for approval"}
+              </button>
+            )}
+            {approvalOn && isAdmin && hasRows && anySubmitted && (
               <>
-                <button onClick={compute} disabled={busy !== null}
-                        className="rounded-md bg-ink text-white px-4 py-2 text-sm font-medium hover:bg-ink-soft disabled:opacity-50">
-                  {busy === "compute" ? "Computing…" : "Compute results"}
+                <button onClick={() => workflow("approve", "approve")}
+                        disabled={busy !== null}
+                        className="rounded-md bg-ledger text-white px-4 py-2 text-sm font-medium hover:opacity-90 disabled:opacity-50">
+                  {busy === "approve" ? "Approving…" : "Approve"}
                 </button>
-                <button onClick={publishAll}
-                        disabled={busy !== null || !rows || rows.length === 0 || unpublished === 0}
-                        className="rounded-md border border-ink text-ink px-4 py-2 text-sm font-medium hover:bg-ink hover:text-white disabled:opacity-40">
-                  {busy === "publish" ? "Publishing…" : `Publish all${unpublished ? ` (${unpublished})` : ""}`}
+                <button onClick={returnToTeacher} disabled={busy !== null}
+                        className="rounded-md border border-sanction text-sanction px-4 py-2 text-sm font-medium hover:bg-sanction hover:text-white disabled:opacity-40">
+                  {busy === "return" ? "Returning…" : "Return for revision"}
                 </button>
               </>
+            )}
+            {approvalOn && isAdmin && hasRows && anyApprovedUnpublished && (
+              <button onClick={publishAll} disabled={busy !== null}
+                      className="rounded-md border border-ink text-ink px-4 py-2 text-sm font-medium hover:bg-ink hover:text-white disabled:opacity-40">
+                {busy === "publish" ? "Publishing…" : `Publish to parents${unpublished ? ` (${unpublished})` : ""}`}
+              </button>
+            )}
+
+            {/* ---- approval gate OFF (default): admin publishes directly ---- */}
+            {!approvalOn && isAdmin && (
+              <button onClick={publishAll}
+                      disabled={busy !== null || !hasRows || unpublished === 0}
+                      className="rounded-md border border-ink text-ink px-4 py-2 text-sm font-medium hover:bg-ink hover:text-white disabled:opacity-40">
+                {busy === "publish" ? "Publishing…" : `Publish all${unpublished ? ` (${unpublished})` : ""}`}
+              </button>
             )}
             {notice && (
               <span role="status"
@@ -213,6 +290,18 @@ export default function ResultsPage() {
               </span>
             )}
           </div>
+
+          {returnNote && (
+            <div className="rounded-lg border border-sanction/40 bg-sanction/5 p-3 max-w-2xl">
+              <p className="text-sm">
+                <span className="font-medium text-sanction">Returned for revision: </span>
+                {returnNote}
+              </p>
+              <p className="text-xs text-ink-soft mt-1">
+                Correct the scores, recompute, then submit for approval again.
+              </p>
+            </div>
+          )}
 
           {rows && rows.length === 0 && (
             <p className="text-sm text-ink-soft border border-dashed border-line rounded-lg p-6 max-w-xl">
@@ -256,8 +345,16 @@ export default function ResultsPage() {
                           <span className="inline-block rounded-full bg-ledger/10 text-ledger px-2 py-0.5 text-xs font-medium">
                             Published
                           </span>
+                        ) : r.approval_status === "approved" ? (
+                          <span className="inline-block rounded-full bg-ledger/10 text-ledger px-2 py-0.5 text-xs font-medium">
+                            Approved
+                          </span>
+                        ) : r.approval_status === "submitted" ? (
+                          <span className="inline-block rounded-full bg-brass/20 text-ink px-2 py-0.5 text-xs font-medium">
+                            Awaiting approval
+                          </span>
                         ) : (
-                          <span className="inline-block rounded-full bg-brass/15 text-ink px-2 py-0.5 text-xs font-medium">
+                          <span className="inline-block rounded-full bg-line text-ink-soft px-2 py-0.5 text-xs font-medium">
                             Draft
                           </span>
                         )}

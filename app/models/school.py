@@ -54,6 +54,11 @@ class School(Base, UUIDMixin, TimestampMixin):
     # per-school configurable grading & policies
     grading_config: Mapped[dict] = mapped_column(JSON, default=DEFAULT_GRADING)
     withhold_results_on_debt: Mapped[bool] = mapped_column(Boolean, default=False)
+    # when off (the default), a school admin computes and publishes results in
+    # one step, as before. When on, results must pass the approval gate
+    # (submit -> approve) before they can be published. Off by default so a
+    # school mid-term sees no change until it opts in.
+    result_approval_required: Mapped[bool] = mapped_column(Boolean, default=False)
     # parents only see "Pay online" when the school has switched it on; pilots
     # start with it off until the school is ready for live payments
     online_payments_enabled: Mapped[bool] = mapped_column(Boolean, default=False)

@@ -16,6 +16,7 @@ type SchoolSettings = {
   name: string; address: string | null; state: string | null;
   primary_color: string; principal_name: string | null;
   withhold_results_on_debt: boolean;
+  result_approval_required: boolean;
   online_payments_enabled: boolean;
   has_logo: boolean; has_signature: boolean; has_stamp: boolean;
   logo_url: string | null;
@@ -186,6 +187,25 @@ export default function SetupPage() {
       await load();
     } catch (e) {
       toast.err(e instanceof ApiError ? e.message : "Could not change the setting.");
+    } finally { setBusy(null); }
+  }
+
+  async function toggleApproval(next: boolean) {
+    setBusy("approval"); setNotice(null);
+    try {
+      await api("/api/schools/me", {
+        method: "PATCH",
+        body: JSON.stringify({ result_approval_required: next }),
+      });
+      setNotice({
+        kind: "ok",
+        text: next
+          ? "Result approval is ON — results now need the principal's approval before publishing."
+          : "Result approval is OFF — an admin publishes results directly.",
+      });
+      await load();
+    } catch (e) {
+      setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not change the setting." });
     } finally { setBusy(null); }
   }
 
@@ -535,6 +555,29 @@ export default function SetupPage() {
           {school.withhold_results_on_debt && (
             <p className="mt-2 text-xs text-brass-ink bg-brass/15 rounded px-2 py-1 inline-block">
               Currently withholding results from debtors.
+            </p>
+          )}
+
+          <label className="flex items-start gap-3 cursor-pointer mt-4 pt-4 border-t border-line">
+            <input
+              type="checkbox"
+              checked={school.result_approval_required}
+              disabled={busy !== null}
+              onChange={(e) => toggleApproval(e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-[color:var(--ink,#0B2239)]"
+            />
+            <span className="text-sm">
+              Require approval before results are published
+              <span className="block text-xs text-ink-soft mt-0.5">
+                When on, a form teacher submits a class&apos;s results and the principal
+                approves them (or returns them with a reason) before they can be
+                published to parents. When off, an admin publishes directly, as now.
+              </span>
+            </span>
+          </label>
+          {school.result_approval_required && (
+            <p className="mt-2 text-xs text-brass-ink bg-brass/15 rounded px-2 py-1 inline-block">
+              Results pass through the approval gate before publishing.
             </p>
           )}
         </section>
