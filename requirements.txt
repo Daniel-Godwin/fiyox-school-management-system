@@ -1,6 +1,7 @@
 fastapi>=0.110
 uvicorn[standard]>=0.27
-sqlalchemy>=2.0
+sqlalchemy[asyncio]>=2.0   # async engine; [asyncio] ensures greenlet is installed
+greenlet>=3.0            # required by SQLAlchemy async (not auto-installed on all Pythons)
 aiosqlite>=0.19          # dev database
 asyncpg>=0.29            # prod (Neon/Postgres)
 pydantic-settings>=2.0
