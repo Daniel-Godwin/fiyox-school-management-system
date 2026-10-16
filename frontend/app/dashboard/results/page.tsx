@@ -35,6 +35,10 @@ export default function ResultsPage() {
   const [busy, setBusy] = useState<string | null>(null); // "compute" | "publish" | pdf id
   const [editing, setEditing] = useState<string | null>(null);   // term_result_id
   const [draft, setDraft] = useState({ teacher: "", principal: "" });
+  const [suggestions, setSuggestions] = useState<{ teacher: string[]; principal: string[] }>({ teacher: [], principal: [] });
+  const [gridOpen, setGridOpen] = useState(false);
+  const [gridTraits, setGridTraits] = useState<string[]>([]);
+  const [gridRows, setGridRows] = useState<{ student_id: string; admission_number: string; name: string; ratings: Record<string, number> }[]>([]);
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [approvalOn, setApprovalOn] = useState(false);
 
@@ -150,13 +154,61 @@ export default function ResultsPage() {
     }
   }
 
+  async function openGrid() {
+    setBusy("grid-load"); setNotice(null);
+    try {
+      const g = await api<{ traits: string[]; students: typeof gridRows }>(
+        `/api/results/affective?arm_id=${armId}&term_id=${termId}`);
+      setGridTraits(g.traits);
+      setGridRows(g.students);
+      setGridOpen(true);
+      if (g.traits.length === 0) {
+        setNotice({ kind: "err", text: "No behaviour traits set up yet — add them under School setup." });
+      }
+    } catch {
+      setNotice({ kind: "err", text: "Could not load the behaviour grid." });
+    } finally { setBusy(null); }
+  }
+
+  function setRating(studentId: string, trait: string, value: number) {
+    setGridRows((rows) => rows.map((r) =>
+      r.student_id === studentId
+        ? { ...r, ratings: value === 0
+            ? Object.fromEntries(Object.entries(r.ratings).filter(([k]) => k !== trait))
+            : { ...r.ratings, [trait]: value } }
+        : r));
+  }
+
+  async function saveGrid() {
+    setBusy("grid-save"); setNotice(null);
+    try {
+      const ratings: Record<string, Record<string, number>> = {};
+      for (const r of gridRows) ratings[r.student_id] = r.ratings;
+      const res = await api<{ saved: number }>("/api/results/affective", {
+        method: "POST", body: JSON.stringify({ arm_id: armId, term_id: termId, ratings }) });
+      setNotice({ kind: "ok", text: `Behaviour ratings saved for ${res.saved} student${res.saved === 1 ? "" : "s"}.` });
+      setGridOpen(false);
+    } catch {
+      setNotice({ kind: "err", text: "Could not save the ratings." });
+    } finally { setBusy(null); }
+  }
+
   function openComments(row: Row) {
     setEditing(row.term_result_id);
     setDraft({
       teacher: row.form_teacher_comment ?? "",
       principal: row.principal_comment ?? "",
     });
+    setSuggestions({ teacher: [], principal: [] });
     setNotice(null);
+    // offer comment-bank entries that fit this student's average
+    const avg = row.average;
+    Promise.all([
+      api<{ text: string }[]>(`/api/comment-bank/suggest?average=${avg}&audience=form_teacher`).catch(() => []),
+      api<{ text: string }[]>(`/api/comment-bank/suggest?average=${avg}&audience=principal`).catch(() => []),
+    ]).then(([t, p]) => setSuggestions({
+      teacher: t.map((x) => x.text), principal: p.map((x) => x.text),
+    }));
   }
 
   async function saveComments(row: Row) {
@@ -247,6 +299,13 @@ export default function ResultsPage() {
               </button>
             )}
 
+            {hasRows && (
+              <button onClick={openGrid} disabled={busy !== null}
+                      className="rounded-md border border-ink text-ink px-4 py-2 text-sm font-medium hover:bg-ink hover:text-white disabled:opacity-40">
+                {busy === "grid-load" ? "Loading…" : "Rate behaviour"}
+              </button>
+            )}
+
             {/* ---- approval gate ON: submit -> approve -> publish ---- */}
             {approvalOn && hasRows && anyDraft && (
               <button onClick={() => workflow("submit", "submit for approval")}
@@ -290,6 +349,51 @@ export default function ResultsPage() {
               </span>
             )}
           </div>
+
+          {gridOpen && gridTraits.length > 0 && (
+            <section className="rounded-lg border border-brass bg-brass/5 p-4 space-y-3">
+              <div className="flex items-baseline justify-between gap-2">
+                <p className="text-sm font-medium">Behaviour ratings (1–5)</p>
+                <button onClick={() => setGridOpen(false)}
+                        className="text-xs text-ink-soft underline underline-offset-2">Close</button>
+              </div>
+              <div className="overflow-x-auto rounded-lg border border-line bg-card">
+                <table className="min-w-[560px] w-full text-sm">
+                  <thead>
+                    <tr className="bg-ink text-white text-left">
+                      <th className="px-3 py-2 font-medium">Student</th>
+                      {gridTraits.map((t) => (
+                        <th key={t} className="px-2 py-2 font-medium text-center whitespace-nowrap">{t}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {gridRows.map((r, i) => (
+                      <tr key={r.student_id} className={i % 2 ? "bg-paper" : "bg-card"}>
+                        <td className="px-3 py-1.5 whitespace-nowrap">
+                          <span className="tabular text-ink-soft mr-2">{r.admission_number}</span>{r.name}
+                        </td>
+                        {gridTraits.map((t) => (
+                          <td key={t} className="px-2 py-1.5 text-center">
+                            <select value={r.ratings[t] ?? 0}
+                                    onChange={(e) => setRating(r.student_id, t, Number(e.target.value))}
+                                    className="rounded border border-line px-1.5 py-1 text-sm">
+                              <option value={0}>–</option>
+                              {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
+                            </select>
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <button onClick={saveGrid} disabled={busy !== null}
+                      className="rounded-md bg-ink text-white px-4 py-2 text-sm font-medium hover:bg-ink-soft disabled:opacity-50">
+                {busy === "grid-save" ? "Saving…" : "Save ratings"}
+              </button>
+            </section>
+          )}
 
           {returnNote && (
             <div className="rounded-lg border border-sanction/40 bg-sanction/5 p-3 max-w-2xl">
@@ -386,12 +490,34 @@ export default function ResultsPage() {
                               <textarea value={draft.teacher} rows={2} maxLength={500}
                                         onChange={(e) => setDraft({ ...draft, teacher: e.target.value })}
                                         className="w-full rounded border border-line px-2 py-1.5 text-sm" />
+                              {suggestions.teacher.length > 0 && (
+                                <div className="mt-1 flex flex-wrap gap-1">
+                                  {suggestions.teacher.map((s, k) => (
+                                    <button key={k} type="button"
+                                            onClick={() => setDraft((d) => ({ ...d, teacher: s }))}
+                                            className="rounded-full border border-line bg-paper px-2 py-0.5 text-xs text-ink-soft hover:border-ink hover:text-ink">
+                                      {s}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
                             </label>
                             <label className="block">
                               <span className="block text-xs text-ink-soft mb-1">Principal&apos;s comment</span>
                               <textarea value={draft.principal} rows={2} maxLength={500}
                                         onChange={(e) => setDraft({ ...draft, principal: e.target.value })}
                                         className="w-full rounded border border-line px-2 py-1.5 text-sm" />
+                              {suggestions.principal.length > 0 && (
+                                <div className="mt-1 flex flex-wrap gap-1">
+                                  {suggestions.principal.map((s, k) => (
+                                    <button key={k} type="button"
+                                            onClick={() => setDraft((d) => ({ ...d, principal: s }))}
+                                            className="rounded-full border border-line bg-paper px-2 py-0.5 text-xs text-ink-soft hover:border-ink hover:text-ink">
+                                      {s}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
                             </label>
                             <div className="flex items-center gap-3">
                               <button onClick={() => saveComments(r)} disabled={busy !== null}

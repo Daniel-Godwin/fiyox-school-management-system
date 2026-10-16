@@ -59,6 +59,9 @@ class School(Base, UUIDMixin, TimestampMixin):
     # (submit -> approve) before they can be published. Off by default so a
     # school mid-term sees no change until it opts in.
     result_approval_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    # behaviour traits the form teacher rates 1-5 on the report card; each
+    # school sets its own list. Empty means the school hasn't configured any.
+    affective_traits: Mapped[list] = mapped_column(JSON, default=list)
     # parents only see "Pay online" when the school has switched it on; pilots
     # start with it off until the school is ready for live payments
     online_payments_enabled: Mapped[bool] = mapped_column(Boolean, default=False)

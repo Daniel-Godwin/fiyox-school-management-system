@@ -112,7 +112,7 @@ def build_report_pdf(data: dict) -> bytes:
     # subject grid
     comps = [c["name"] for c in data["components"]]
     header = ["Subject"] + [f"{c['name']}\n/{c['max']}" for c in data["components"]] + [
-        "Total\n/100", "Grade", "Class\nAvg.", "Pos.", "Remark"]
+        "Total\n/100", "Grade", "Class\nAvg.", "High", "Low", "Pos.", "Remark"]
     rows = [header]
     for r in data["subjects"]:
         bd = r["breakdown"] or {}
@@ -120,12 +120,14 @@ def build_report_pdf(data: dict) -> bytes:
             r["subject"],
             *[str(bd.get(c, "-")) for c in comps],
             str(r["total"]), r["grade"], str(r["class_average"]),
+            str(r.get("class_highest", "-")), str(r.get("class_lowest", "-")),
             str(r["position"]), r["remark"],
         ])
 
     n_comp = len(comps)
-    widths = [38 * mm] + [13 * mm] * n_comp + [13 * mm, 12 * mm, 14 * mm, 10 * mm]
-    widths.append(max(20 * mm, 182 * mm - sum(widths)))
+    widths = [36 * mm] + [12 * mm] * n_comp + [12 * mm, 11 * mm, 13 * mm,
+                                               11 * mm, 11 * mm, 10 * mm]
+    widths.append(max(18 * mm, 182 * mm - sum(widths)))
 
     grid = Table(rows, colWidths=widths, repeatRows=1)
     grid.setStyle(TableStyle([
@@ -200,6 +202,35 @@ def build_report_pdf(data: dict) -> bytes:
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ]))
         story.append(at)
+        story.append(Spacer(1, 8))
+
+    # cumulative session result (third-term cards only)
+    cum = data.get("cumulative")
+    if cum:
+        story.append(Paragraph(
+            f"<b>Cumulative result — {cum.get('session', '')} session</b>", small))
+        story.append(Spacer(1, 3))
+        head = [t["term"] for t in cum["per_term"]] + ["Cumulative\nAverage", "Position"]
+        vals = [(f"{t['average']}%" if t["average"] is not None else "-")
+                for t in cum["per_term"]]
+        vals += [f"{cum['cumulative_average']}%",
+                 f"{cum['cumulative_position']} of {cum['class_size']}"]
+        n = len(head)
+        cw = [min(40 * mm, 182 * mm / n)] * n
+        cumt = Table([head, vals], colWidths=cw)
+        cumt.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), brand),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME", (-1, 1), (-1, 1), "Helvetica-Bold"),
+            ("FONTNAME", (-2, 1), (-2, 1), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        story.append(cumt)
         story.append(Spacer(1, 8))
 
     # affective domain (optional)

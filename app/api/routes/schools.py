@@ -55,6 +55,7 @@ class SchoolSettingsIn(BaseModel):
     primary_color: str | None = None      # hex, brands the report card & receipt
     withhold_results_on_debt: bool | None = None
     result_approval_required: bool | None = None
+    affective_traits: list[str] | None = None
     online_payments_enabled: bool | None = None
 
 
@@ -75,6 +76,7 @@ async def my_school(
         "principal_name": school.principal_name,
         "withhold_results_on_debt": school.withhold_results_on_debt,
         "result_approval_required": school.result_approval_required,
+        "affective_traits": school.affective_traits or [],
         "online_payments_enabled": school.online_payments_enabled,
         "has_logo": bool(school.logo_url),
         "has_signature": bool(school.signature_url),
@@ -115,6 +117,7 @@ async def update_my_school(
         "principal_name": school.principal_name,
         "withhold_results_on_debt": school.withhold_results_on_debt,
         "result_approval_required": school.result_approval_required,
+        "affective_traits": school.affective_traits or [],
         "online_payments_enabled": school.online_payments_enabled,
         "updated": list(changes.keys()),
     }

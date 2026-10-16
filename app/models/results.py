@@ -57,6 +57,10 @@ class SubjectResult(Base, UUIDMixin, TimestampMixin, TenantMixin):
     remark: Mapped[str] = mapped_column(String(40), default="")
     subject_position: Mapped[int] = mapped_column(Integer, default=0)
     class_average: Mapped[float] = mapped_column(Float, default=0.0)
+    # the class's best and worst total for this subject — shown on the report
+    # card so a parent sees where their child sits in the subject's spread
+    class_highest: Mapped[float] = mapped_column(Float, default=0.0)
+    class_lowest: Mapped[float] = mapped_column(Float, default=0.0)
     # raw component scores kept for the report card grid, e.g. {"Test 1": 8, ...}
     breakdown: Mapped[dict] = mapped_column(JSON, default=dict)
 
@@ -95,3 +99,20 @@ class TermResult(Base, UUIDMixin, TimestampMixin, TenantMixin):
     approved_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     approval_note: Mapped[str] = mapped_column(String(300), default="")
+
+
+class CommentBankEntry(Base, UUIDMixin, TimestampMixin, TenantMixin):
+    """A reusable report-card comment a school keeps on file.
+
+    Each entry is banded by average, so when a teacher writes a comment Fiyox
+    can suggest the ones that fit a given student's performance. Bands are
+    inclusive of min, exclusive of max (0-40, 40-50, ...), so they tile the
+    0-100 range without overlap.
+    """
+    __tablename__ = "comment_bank"
+
+    text: Mapped[str] = mapped_column(String(300))
+    min_average: Mapped[float] = mapped_column(Float, default=0.0)
+    max_average: Mapped[float] = mapped_column(Float, default=100.0)
+    # "form_teacher" or "principal" — so each slot suggests apt comments
+    audience: Mapped[str] = mapped_column(String(16), default="form_teacher")

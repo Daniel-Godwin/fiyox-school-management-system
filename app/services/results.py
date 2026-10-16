@@ -80,11 +80,15 @@ async def compute_term(db: AsyncSession, school_id: str, arm_id: str, term_id: s
     # subject position + class average per subject
     subj_positions: dict[str, dict[str, int]] = {}
     subj_average: dict[str, float] = {}
+    subj_highest: dict[str, float] = {}
+    subj_lowest: dict[str, float] = {}
     for subj in subjects:
         pairs = [(sid, totals[sid].get(subj, 0.0)) for sid in student_ids
                  if subj in totals[sid]]
         subj_positions[subj] = rank(pairs)
         subj_average[subj] = round(sum(p[1] for p in pairs) / len(pairs), 2) if pairs else 0.0
+        subj_highest[subj] = round(max(p[1] for p in pairs), 2) if pairs else 0.0
+        subj_lowest[subj] = round(min(p[1] for p in pairs), 2) if pairs else 0.0
 
     # remember any human-written comments before wiping — recomputing a term
     # must never destroy what a form teacher or principal actually wrote
@@ -126,6 +130,8 @@ async def compute_term(db: AsyncSession, school_id: str, arm_id: str, term_id: s
                 grade=g, remark=remark,
                 subject_position=subj_positions[subj].get(sid, 0),
                 class_average=subj_average[subj],
+                class_highest=subj_highest[subj],
+                class_lowest=subj_lowest[subj],
                 breakdown=breakdown[sid][subj],
             ))
             subj_count += 1

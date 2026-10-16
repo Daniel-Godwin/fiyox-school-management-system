@@ -8,8 +8,9 @@ from app.core.deps import DbDep, CurrentUser, require_roles, tenant_scope
 from app.models.school import User, Role
 from app.models.student import Student, Guardian
 from app.models.results import (
-    AssessmentComponent, ScoreEntry, TermResult,
+    AssessmentComponent, ScoreEntry, TermResult, CommentBankEntry,
 )
+from pydantic import BaseModel, Field
 from app.schemas import (
     ComponentIn, ComponentOut, BulkScoresIn, ComputeIn, TermResultUpdate,
 )
@@ -434,3 +435,155 @@ async def report_pdf(student_id: str, db: DbDep, user: CurrentUser,
     fname = f"report_{student.admission_number.replace('/', '-')}_{data['term']['name']}.pdf"
     return StreamingResponse(BytesIO(pdf), media_type="application/pdf",
                              headers={"Content-Disposition": f'inline; filename="{fname}"'})
+
+
+# ============================ Comment bank ============================
+# Reusable, average-banded report-card comments. When a teacher writes a
+# comment, the UI calls /suggest to offer the ones that fit the student.
+
+class CommentBankIn(BaseModel):
+    text: str = Field(min_length=2, max_length=300)
+    min_average: float = Field(default=0.0, ge=0, le=100)
+    max_average: float = Field(default=100.0, ge=0, le=100)
+    audience: str = Field(default="form_teacher", pattern="^(form_teacher|principal)$")
+
+
+@router.get("/comment-bank", tags=["results"])
+async def list_comment_bank(
+    db: DbDep, user: Annotated[User, Depends(require_roles(
+        Role.TEACHER, Role.SCHOOL_ADMIN))],
+    audience: str | None = Query(None),
+):
+    school_id = tenant_scope(user)
+    stmt = select(CommentBankEntry).where(
+        CommentBankEntry.school_id == school_id,
+        CommentBankEntry.deleted_at.is_(None))
+    if audience:
+        stmt = stmt.where(CommentBankEntry.audience == audience)
+    rows = (await db.execute(stmt)).scalars().all()
+    rows.sort(key=lambda r: (r.audience, r.min_average))
+    return [{"id": r.id, "text": r.text, "min_average": r.min_average,
+             "max_average": r.max_average, "audience": r.audience} for r in rows]
+
+
+@router.get("/comment-bank/suggest", tags=["results"])
+async def suggest_comments(
+    db: DbDep, user: Annotated[User, Depends(require_roles(
+        Role.TEACHER, Role.SCHOOL_ADMIN))],
+    average: float = Query(...), audience: str = Query("form_teacher"),
+):
+    """Bank entries whose band contains this average — what the UI offers a
+    teacher as they write. Band is [min, max], inclusive both ends."""
+    school_id = tenant_scope(user)
+    rows = (await db.execute(select(CommentBankEntry).where(
+        CommentBankEntry.school_id == school_id,
+        CommentBankEntry.audience == audience,
+        CommentBankEntry.deleted_at.is_(None),
+        CommentBankEntry.min_average <= average,
+        CommentBankEntry.max_average >= average))).scalars().all()
+    return [{"id": r.id, "text": r.text} for r in rows]
+
+
+@router.post("/comment-bank", tags=["results"], status_code=status.HTTP_201_CREATED)
+async def add_comment_bank(
+    payload: CommentBankIn, db: DbDep,
+    user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN, Role.TEACHER))],
+):
+    school_id = tenant_scope(user)
+    lo, hi = sorted((payload.min_average, payload.max_average))
+    entry = CommentBankEntry(school_id=school_id, text=payload.text.strip(),
+                             min_average=lo, max_average=hi,
+                             audience=payload.audience, created_by=user.id)
+    db.add(entry)
+    await db.commit()
+    return {"id": entry.id}
+
+
+@router.delete("/comment-bank/{entry_id}", tags=["results"])
+async def delete_comment_bank(
+    entry_id: str, db: DbDep,
+    user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN, Role.TEACHER))],
+):
+    from datetime import datetime, timezone
+    school_id = tenant_scope(user)
+    entry = await db.get(CommentBankEntry, entry_id)
+    if not entry or entry.school_id != school_id or entry.deleted_at:
+        raise HTTPException(status_code=404, detail="Comment not found")
+    entry.deleted_at = datetime.now(timezone.utc)
+    entry.updated_by = user.id
+    await db.commit()
+    return {"removed": True}
+
+
+# ====================== Affective traits (grid) ======================
+# The school configures its trait list under settings. Here a form teacher
+# rates a whole arm at once; ratings land on each student's TermResult.
+
+class AffectiveGridIn(BaseModel):
+    arm_id: str
+    term_id: str
+    # {student_id: {trait: rating(1-5)}}
+    ratings: dict[str, dict[str, int]]
+
+
+@router.get("/results/affective", tags=["results"])
+async def get_affective_grid(
+    db: DbDep, user: Annotated[User, Depends(require_roles(
+        Role.TEACHER, Role.SCHOOL_ADMIN))],
+    arm_id: str = Query(...), term_id: str = Query(...),
+):
+    """The school's trait list plus each student's current ratings, for the
+    grid the form teacher fills in."""
+    from app.models.school import School
+    school_id = tenant_scope(user)
+    school = await db.get(School, school_id)
+    traits = (school.affective_traits or []) if school else []
+
+    results = await _arm_term_results(db, school_id, arm_id, term_id)
+    students = {s.id: s for s in (await db.execute(select(Student).where(
+        Student.school_id == school_id))).scalars().all()}
+    rows = []
+    for tr in results:
+        st = students.get(tr.student_id)
+        rows.append({
+            "student_id": tr.student_id,
+            "admission_number": st.admission_number if st else "",
+            "name": f"{st.first_name} {st.last_name}" if st else "",
+            "ratings": tr.affective or {},
+        })
+    rows.sort(key=lambda r: r["name"])
+    return {"traits": traits, "students": rows}
+
+
+@router.post("/results/affective", tags=["results"])
+async def save_affective_grid(
+    payload: AffectiveGridIn, request: Request, db: DbDep,
+    user: Annotated[User, Depends(require_roles(Role.TEACHER, Role.SCHOOL_ADMIN))],
+):
+    """Save behaviour ratings for a whole arm. Ratings are clamped to 1-5 and
+    only known traits are kept; an empty rating clears that trait."""
+    from app.models.school import School
+    school_id = tenant_scope(user)
+    school = await db.get(School, school_id)
+    traits = set((school.affective_traits or []) if school else [])
+
+    results = {tr.student_id: tr for tr in
+               await _arm_term_results(db, school_id, payload.arm_id, payload.term_id)}
+    saved = 0
+    for sid, ratings in payload.ratings.items():
+        tr = results.get(sid)
+        if not tr:
+            continue
+        clean = {}
+        for trait, val in ratings.items():
+            if trait in traits and isinstance(val, int) and 1 <= val <= 5:
+                clean[trait] = val
+        tr.affective = clean
+        tr.updated_by = user.id
+        saved += 1
+    await record_audit(db, school_id=school_id, user_id=user.id, action="update",
+                       table_name="term_results", record_id=payload.arm_id,
+                       changes={"affective_rated": {"old": None, "new": saved}},
+                       ip_address=request.client.host if request.client else None)
+    await db.commit()
+    return {"saved": saved}

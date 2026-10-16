@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.school import School
 from app.models.student import Student
-from app.models.academics import Term, ClassArm, SchoolClass, Subject
+from app.models.academics import Term, ClassArm, SchoolClass, Subject, AcademicSession
 from app.models.results import AssessmentComponent, SubjectResult, TermResult
 
 
@@ -50,8 +50,58 @@ async def build_report_data(db: AsyncSession, school_id: str,
             "grade": sr.grade,
             "remark": sr.remark,
             "class_average": sr.class_average,
+            "class_highest": sr.class_highest,
+            "class_lowest": sr.class_lowest,
             "position": sr.subject_position,
         })
+
+    # ---- cumulative session result (third term only) ----
+    # On the final term's card, show how the student did across the whole
+    # session: each term's average, the cumulative average, and the cumulative
+    # position in the class. Computed live from the three terms' results.
+    cumulative = None
+    term_name = str(getattr(term.name, "value", term.name)) if term else ""
+    if term and term_name == "third" and arm:
+        session_terms = (await db.execute(select(Term).where(
+            Term.school_id == school_id,
+            Term.session_id == term.session_id))).scalars().all()
+        order = {"first": 1, "second": 2, "third": 3}
+        session_terms.sort(key=lambda t: order.get(
+            str(getattr(t.name, "value", t.name)), 9))
+        term_ids = [t.id for t in session_terms]
+
+        # every term result in this arm for the session, grouped by student
+        all_trs = (await db.execute(select(TermResult).where(
+            TermResult.school_id == school_id,
+            TermResult.arm_id == arm.id,
+            TermResult.term_id.in_(term_ids)))).scalars().all()
+        by_student: dict[str, dict[str, float]] = {}
+        for r in all_trs:
+            by_student.setdefault(r.student_id, {})[r.term_id] = r.average
+
+        def cum_avg(avgs: dict[str, float]) -> float:
+            vals = [avgs[t] for t in term_ids if t in avgs]
+            return round(sum(vals) / len(vals), 2) if vals else 0.0
+
+        # rank every student in the arm by cumulative average
+        ranking = sorted(((sid, cum_avg(a)) for sid, a in by_student.items()),
+                         key=lambda x: x[1], reverse=True)
+        position = next((i + 1 for i, (sid, _) in enumerate(ranking)
+                         if sid == student_id), 0)
+
+        mine = by_student.get(student_id, {})
+        per_term = [{
+            "term": str(getattr(t.name, "value", t.name)).title(),
+            "average": mine.get(t.id),
+        } for t in session_terms]
+        cumulative = {
+            "session": sessn.name if (sessn := await db.get(
+                AcademicSession, term.session_id)) else "",
+            "per_term": per_term,
+            "cumulative_average": cum_avg(mine),
+            "cumulative_position": position,
+            "class_size": len(by_student),
+        }
 
     # attendance for the term — parents look for this as closely as the marks.
     # Bounded by the term's dates when the school has set them; otherwise every
@@ -100,6 +150,7 @@ async def build_report_data(db: AsyncSession, school_id: str,
                     "position": tr.overall_position, "class_size": tr.class_size,
                     "class_average": tr.class_average},
         "attendance": attendance,
+        "cumulative": cumulative,
         "affective": tr.affective,
         "comments": {"form_teacher": tr.form_teacher_comment,
                      "principal": tr.principal_comment},

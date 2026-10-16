@@ -18,8 +18,14 @@ type SchoolSettings = {
   withhold_results_on_debt: boolean;
   result_approval_required: boolean;
   online_payments_enabled: boolean;
+  affective_traits: string[];
   has_logo: boolean; has_signature: boolean; has_stamp: boolean;
   logo_url: string | null;
+};
+
+type CommentBankEntry = {
+  id: string; text: string; min_average: number; max_average: number;
+  audience: "form_teacher" | "principal";
 };
 
 export default function SetupPage() {
@@ -28,6 +34,10 @@ export default function SetupPage() {
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [components, setComponents] = useState<Component[]>([]);
   const [school, setSchool] = useState<SchoolSettings | null>(null);
+  const [newTrait, setNewTrait] = useState("");
+  const [bank, setBank] = useState<CommentBankEntry[]>([]);
+  const [newComment, setNewComment] = useState<{ text: string; min: string; max: string; audience: "form_teacher" | "principal" }>(
+    { text: "", min: "0", max: "100", audience: "form_teacher" });
   const [integrations, setIntegrations] = useState<{
     sms: { live: boolean; message: string };
     online_payments: { live: boolean; message: string };
@@ -187,6 +197,64 @@ export default function SetupPage() {
       await load();
     } catch (e) {
       toast.err(e instanceof ApiError ? e.message : "Could not change the setting.");
+    } finally { setBusy(null); }
+  }
+
+  const loadBank = useCallback(async () => {
+    try { setBank(await api<CommentBankEntry[]>("/api/comment-bank")); }
+    catch { /* non-fatal */ }
+  }, []);
+  useEffect(() => { loadBank(); }, [loadBank]);
+
+  async function saveTraits(next: string[]) {
+    setBusy("traits");
+    try {
+      await api("/api/schools/me", { method: "PATCH",
+        body: JSON.stringify({ affective_traits: next }) });
+      await load();
+    } catch {
+      toast.err("Could not save the traits.");
+    } finally { setBusy(null); }
+  }
+  function addTrait() {
+    const t = newTrait.trim();
+    if (!t || !school) return;
+    if (school.affective_traits.some((x) => x.toLowerCase() === t.toLowerCase())) {
+      toast.err("That trait is already in the list."); return;
+    }
+    setNewTrait("");
+    saveTraits([...school.affective_traits, t]);
+  }
+  function removeTrait(t: string) {
+    if (!school) return;
+    saveTraits(school.affective_traits.filter((x) => x !== t));
+  }
+
+  async function addComment() {
+    const text = newComment.text.trim();
+    const min = Number(newComment.min), max = Number(newComment.max);
+    if (!text) { toast.err("Enter the comment text."); return; }
+    if (Number.isNaN(min) || Number.isNaN(max) || min < 0 || max > 100) {
+      toast.err("Average band must be between 0 and 100."); return;
+    }
+    setBusy("comment");
+    try {
+      await api("/api/comment-bank", { method: "POST", body: JSON.stringify({
+        text, min_average: min, max_average: max, audience: newComment.audience }) });
+      setNewComment({ text: "", min: "0", max: "100", audience: newComment.audience });
+      await loadBank();
+      toast.ok("Comment added to the bank.");
+    } catch {
+      toast.err("Could not add the comment.");
+    } finally { setBusy(null); }
+  }
+  async function deleteComment(id: string) {
+    setBusy(`c-${id}`);
+    try {
+      await api(`/api/comment-bank/${id}`, { method: "DELETE" });
+      await loadBank();
+    } catch {
+      toast.err("Could not remove the comment.");
     } finally { setBusy(null); }
   }
 
@@ -580,6 +648,104 @@ export default function SetupPage() {
               Results pass through the approval gate before publishing.
             </p>
           )}
+        </section>
+      )}
+
+      {/* behaviour (affective) traits */}
+      {school && (
+        <section className="rounded-lg border border-line bg-card p-4">
+          <p className="text-sm font-medium mb-1">Behaviour traits (report card)</p>
+          <p className="text-xs text-ink-soft mb-3">
+            The behaviour and skill traits your school rates on the report card,
+            each scored 1–5 (e.g. Punctuality, Neatness, Handwriting). Form
+            teachers rate a whole class at once from the Results page.
+          </p>
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {school.affective_traits.length === 0 ? (
+              <span className="text-xs text-ink-soft">None yet — add your first trait below.</span>
+            ) : school.affective_traits.map((t) => (
+              <span key={t} className="inline-flex items-center gap-1.5 rounded-full border border-line bg-paper px-3 py-1 text-xs">
+                {t}
+                <button onClick={() => removeTrait(t)} disabled={busy !== null}
+                        aria-label={`Remove ${t}`}
+                        className="text-ink-soft hover:text-sanction disabled:opacity-40">×</button>
+              </span>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <input value={newTrait} placeholder="e.g. Punctuality"
+                   onChange={(e) => setNewTrait(e.target.value)}
+                   onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTrait(); } }}
+                   className="rounded border border-line px-2 py-1.5 text-sm" />
+            <button onClick={addTrait} disabled={busy !== null || !newTrait.trim()}
+                    className="rounded-md border border-ink text-ink px-3 py-1.5 text-sm font-medium hover:bg-ink hover:text-white disabled:opacity-40">
+              {busy === "traits" ? "Saving…" : "Add trait"}
+            </button>
+          </div>
+        </section>
+      )}
+
+      {/* comment bank */}
+      {school && (
+        <section className="rounded-lg border border-line bg-card p-4">
+          <p className="text-sm font-medium mb-1">Comment bank</p>
+          <p className="text-xs text-ink-soft mb-3">
+            Reusable report-card comments, each tied to an average range. When a
+            teacher writes a comment, Fiyox suggests the ones that fit the
+            student&apos;s average. Audience is whose comment line it fills.
+          </p>
+
+          {bank.length > 0 && (
+            <div className="overflow-x-auto rounded-lg border border-line mb-3">
+              <table className="min-w-[520px] w-full text-sm">
+                <thead>
+                  <tr className="bg-paper text-left text-xs text-ink-soft">
+                    <th className="px-3 py-1.5 font-medium">Comment</th>
+                    <th className="px-3 py-1.5 font-medium">For average</th>
+                    <th className="px-3 py-1.5 font-medium">Audience</th>
+                    <th className="px-3 py-1.5"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bank.map((c) => (
+                    <tr key={c.id} className="border-t border-line">
+                      <td className="px-3 py-1.5">{c.text}</td>
+                      <td className="px-3 py-1.5 tabular whitespace-nowrap">{c.min_average}–{c.max_average}%</td>
+                      <td className="px-3 py-1.5 text-xs">{c.audience === "principal" ? "Principal" : "Form teacher"}</td>
+                      <td className="px-3 py-1.5 text-right">
+                        <button onClick={() => deleteComment(c.id)} disabled={busy !== null}
+                                className="text-xs text-sanction underline underline-offset-2 hover:opacity-70 disabled:opacity-40">
+                          {busy === `c-${c.id}` ? "…" : "Remove"}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto_auto] gap-2 items-end">
+            <input value={newComment.text} placeholder="A hardworking and focused student."
+                   onChange={(e) => setNewComment({ ...newComment, text: e.target.value })}
+                   className="rounded border border-line px-2 py-1.5 text-sm" />
+            <input value={newComment.min} type="number" min={0} max={100} aria-label="Minimum average"
+                   onChange={(e) => setNewComment({ ...newComment, min: e.target.value })}
+                   className="w-20 rounded border border-line px-2 py-1.5 text-sm" />
+            <input value={newComment.max} type="number" min={0} max={100} aria-label="Maximum average"
+                   onChange={(e) => setNewComment({ ...newComment, max: e.target.value })}
+                   className="w-20 rounded border border-line px-2 py-1.5 text-sm" />
+            <select value={newComment.audience}
+                    onChange={(e) => setNewComment({ ...newComment, audience: e.target.value as "form_teacher" | "principal" })}
+                    className="rounded border border-line px-2 py-1.5 text-sm">
+              <option value="form_teacher">Form teacher</option>
+              <option value="principal">Principal</option>
+            </select>
+          </div>
+          <button onClick={addComment} disabled={busy !== null || !newComment.text.trim()}
+                  className="mt-2 rounded-md border border-ink text-ink px-3 py-1.5 text-sm font-medium hover:bg-ink hover:text-white disabled:opacity-40">
+            {busy === "comment" ? "Adding…" : "Add comment"}
+          </button>
         </section>
       )}
 
