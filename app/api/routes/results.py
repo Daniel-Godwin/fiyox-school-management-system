@@ -173,38 +173,159 @@ async def list_results(
             "position": tr.overall_position,
             "class_size": tr.class_size,
             "is_published": tr.is_published,
+            "approval_status": tr.approval_status,
+            "approval_note": tr.approval_note,
             "form_teacher_comment": tr.form_teacher_comment,
             "principal_comment": tr.principal_comment,
         })
     return sorted(rows, key=lambda r: r["position"])
 
 
-# ---------- Bulk publish (school admin) ----------
+async def _arm_term_results(db, school_id: str, arm_id: str, term_id: str):
+    return (await db.execute(select(TermResult).where(
+        TermResult.school_id == school_id,
+        TermResult.arm_id == arm_id,
+        TermResult.term_id == term_id))).scalars().all()
+
+
+# ---------- Approval workflow ----------
+# The release of a report card now passes through an explicit gate:
+#   draft  --submit-->  submitted  --approve-->  approved  --publish-->  parents
+# A form teacher prepares and submits; the principal approves (or returns with a
+# reason); only approved results can be published. Recomputing a term rewrites
+# these rows, so changed marks always return the result to draft.
+
+@router.post("/results/submit", tags=["results"])
+async def submit_results(
+    payload: ComputeIn, request: Request, db: DbDep,
+    user: Annotated[User, Depends(require_roles(Role.TEACHER, Role.SCHOOL_ADMIN))],
+):
+    """Form teacher (or admin) submits an arm's computed results for approval."""
+    school_id = tenant_scope(user)
+    ip = request.client.host if request.client else None
+    results = await _arm_term_results(db, school_id, payload.arm_id, payload.term_id)
+    if not results:
+        raise HTTPException(status_code=404, detail="No computed results to submit")
+    submitted = 0
+    for tr in results:
+        if tr.approval_status == "draft":
+            tr.approval_status = "submitted"
+            tr.approval_note = ""
+            tr.updated_by = user.id
+            submitted += 1
+    await record_audit(db, school_id=school_id, user_id=user.id, action="update",
+                       table_name="term_results", record_id=payload.arm_id,
+                       changes={"submitted_for_approval": {"old": None, "new": submitted}},
+                       ip_address=ip)
+    await db.commit()
+    return {"submitted": submitted, "note": "Results sent to the principal for approval."}
+
+
+@router.post("/results/approve", tags=["results"])
+async def approve_results(
+    payload: ComputeIn, request: Request, db: DbDep,
+    user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN))],
+):
+    """Principal approves submitted results; they become publishable."""
+    from datetime import datetime, timezone
+
+    school_id = tenant_scope(user)
+    ip = request.client.host if request.client else None
+    results = await _arm_term_results(db, school_id, payload.arm_id, payload.term_id)
+    now = datetime.now(timezone.utc)
+    approved = 0
+    for tr in results:
+        if tr.approval_status == "submitted":
+            tr.approval_status = "approved"
+            tr.approved_by = user.id
+            tr.approved_at = now
+            tr.approval_note = ""
+            tr.updated_by = user.id
+            approved += 1
+    if not approved:
+        raise HTTPException(
+            status_code=400,
+            detail="Nothing to approve — results must be submitted for approval first")
+    await record_audit(db, school_id=school_id, user_id=user.id, action="update",
+                       table_name="term_results", record_id=payload.arm_id,
+                       changes={"approved": {"old": None, "new": approved}},
+                       ip_address=ip)
+    await db.commit()
+    return {"approved": approved, "note": "Approved. These results can now be published."}
+
+
+@router.post("/results/return", tags=["results"])
+async def return_results(
+    payload: TermResultUpdate, request: Request, db: DbDep,
+    user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN))],
+    arm_id: str = Query(...), term_id: str = Query(...),
+):
+    """Principal returns submitted results to the form teacher, with a reason."""
+    school_id = tenant_scope(user)
+    ip = request.client.host if request.client else None
+    note = (payload.form_teacher_comment or "").strip()[:300]
+    results = await _arm_term_results(db, school_id, arm_id, term_id)
+    returned = 0
+    for tr in results:
+        if tr.approval_status == "submitted":
+            tr.approval_status = "draft"
+            tr.approval_note = note
+            tr.updated_by = user.id
+            returned += 1
+    if not returned:
+        raise HTTPException(
+            status_code=400, detail="Nothing to return — no results are awaiting approval")
+    await record_audit(db, school_id=school_id, user_id=user.id, action="update",
+                       table_name="term_results", record_id=arm_id,
+                       changes={"returned_for_revision": {"old": None, "new": note or returned}},
+                       ip_address=ip)
+    await db.commit()
+    return {"returned": returned, "note": "Returned to the form teacher for revision."}
+
+
+# ---------- Bulk publish (school admin) — only approved results ----------
 @router.post("/results/publish", tags=["results"])
 async def publish_results(
     payload: ComputeIn, request: Request, db: DbDep,
     user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN))],
 ):
-    """Publish every computed result for an arm+term in one action (each row audited)."""
+    """Publish an arm+term's results to parents — only those that are approved.
+
+    A result that has not been approved is left unpublished and reported back,
+    so nothing reaches parents without passing the approval gate.
+    """
     school_id = tenant_scope(user)
     ip = request.client.host if request.client else None
-    results = (await db.execute(select(TermResult).where(
-        TermResult.school_id == school_id,
-        TermResult.arm_id == payload.arm_id,
-        TermResult.term_id == payload.term_id))).scalars().all()
-    published = 0
+    # the approval gate only applies when the school has switched it on;
+    # otherwise an admin publishes directly, exactly as before
+    from app.models.school import School as _School
+    school = await db.get(_School, school_id)
+    gate_on = bool(school and school.result_approval_required)
+
+    results = await _arm_term_results(db, school_id, payload.arm_id, payload.term_id)
+    published = already = blocked = 0
     for tr in results:
-        if not tr.is_published:
-            await record_audit(db, school_id=school_id, user_id=user.id,
-                               action="publish", table_name="term_results",
-                               record_id=tr.id,
-                               changes={"is_published": {"old": False, "new": True}},
-                               ip_address=ip)
-            tr.is_published = True
-            tr.updated_by = user.id
-            published += 1
+        if tr.is_published:
+            already += 1
+            continue
+        if gate_on and tr.approval_status != "approved":
+            blocked += 1
+            continue
+        await record_audit(db, school_id=school_id, user_id=user.id,
+                           action="publish", table_name="term_results",
+                           record_id=tr.id,
+                           changes={"is_published": {"old": False, "new": True}},
+                           ip_address=ip)
+        tr.is_published = True
+        tr.updated_by = user.id
+        published += 1
     await db.commit()
-    return {"published": published, "already_published": len(results) - published}
+    result = {"published": published, "already_published": already,
+              "blocked_unapproved": blocked}
+    if blocked and not published:
+        result["note"] = ("These results are not approved yet. The principal must "
+                          "approve them before they can be published.")
+    return result
 
 
 # ---------- Edit term result: affective, comments, publish ----------
@@ -218,6 +339,15 @@ async def update_term_result(
     if not tr or tr.school_id != school_id:
         raise HTTPException(status_code=404, detail="Term result not found")
     fields = payload.model_dump(exclude_none=True)
+    # when the school requires approval, a single result cannot be published
+    # here unless it has been approved — the gate is not bypassable via edit
+    if fields.get("is_published") and tr.approval_status != "approved":
+        from app.models.school import School as _School
+        school = await db.get(_School, school_id)
+        if school and school.result_approval_required:
+            raise HTTPException(
+                status_code=400,
+                detail="This result must be approved before it can be published")
     changes = {}
     for field, value in fields.items():
         old = getattr(tr, field)

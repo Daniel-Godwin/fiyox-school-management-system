@@ -4,8 +4,10 @@ Design: raw ScoreEntry rows (one per component) are the source of truth teachers
 edit. SubjectResult and TermResult are *computed* views produced by the compute
 service — they hold totals, grades and positions so report cards render instantly.
 """
+from datetime import datetime
+
 from sqlalchemy import (
-    Boolean, Float, ForeignKey, Integer, JSON, String, UniqueConstraint,
+    Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import Base, UUIDMixin, TimestampMixin, TenantMixin
@@ -85,3 +87,11 @@ class TermResult(Base, UUIDMixin, TimestampMixin, TenantMixin):
     principal_comment: Mapped[str] = mapped_column(String(500), default="")
     comments_edited: Mapped[bool] = mapped_column(Boolean, default=False)
     is_published: Mapped[bool] = mapped_column(Boolean, default=False)
+    # approval workflow: results must be approved before they can be published.
+    # draft -> submitted (form teacher) -> approved (principal) -> publish.
+    # Recomputing a term deletes and rewrites these rows, so a recompute
+    # naturally returns a result to "draft" — changed marks void prior approval.
+    approval_status: Mapped[str] = mapped_column(String(12), default="draft")
+    approved_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    approval_note: Mapped[str] = mapped_column(String(300), default="")
