@@ -23,6 +23,12 @@ from app.models.notifications import (
     MessageLog, Channel, MessageStatus, MessagePurpose,
 )
 from app.models.demo import DemoRequest
+from app.models.cbt import (
+    CBTExam, CBTQuestion, CBTAttempt,
+    EXAM_DRAFT, EXAM_PUBLISHED, EXAM_CLOSED, EXAM_STATUSES,
+    Q_SINGLE, Q_MULTIPLE, Q_BOOLEAN, Q_SHORT, QUESTION_TYPES,
+    ATTEMPT_IN_PROGRESS, ATTEMPT_SUBMITTED,
+)
 
 __all__ = [
     "Base", "School", "User", "Role", "DEFAULT_GRADING",
@@ -38,4 +44,9 @@ __all__ = [
     "MessageLog", "Channel", "MessageStatus", "MessagePurpose",
     "Period", "Lesson", "Weekday", "WEEKDAY_ORDER",
     "VerificationCode", "VerifyChannel", "VerifyPurpose",
+    "DemoRequest",
+    "CBTExam", "CBTQuestion", "CBTAttempt",
+    "EXAM_DRAFT", "EXAM_PUBLISHED", "EXAM_CLOSED", "EXAM_STATUSES",
+    "Q_SINGLE", "Q_MULTIPLE", "Q_BOOLEAN", "Q_SHORT", "QUESTION_TYPES",
+    "ATTEMPT_IN_PROGRESS", "ATTEMPT_SUBMITTED",
 ]

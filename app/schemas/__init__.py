@@ -26,6 +26,9 @@ from app.schemas.users import (
     UserCreate, UserAdminOut, UserCreatedOut, UserStatusIn, WardLinkIn,
     ChangePasswordIn,
 )
+from app.schemas.cbt import (
+    QuestionIn, QuestionOut, ExamIn, ExamPatch, ExamOut, ExamDetailOut, SubmitIn,
+)
 
 __all__ = [
     "Token", "LoginIn", "UserOut",
@@ -41,4 +44,6 @@ __all__ = [
     "UserCreate", "UserAdminOut", "UserCreatedOut", "UserStatusIn",
     "WardLinkIn", "ChangePasswordIn",
     "SessionIn", "TermIn", "ClassIn", "ArmIn", "SubjectIn", "QuickSetupIn",
+    "QuestionIn", "QuestionOut", "ExamIn", "ExamPatch", "ExamOut",
+    "ExamDetailOut", "SubmitIn",
 ]
