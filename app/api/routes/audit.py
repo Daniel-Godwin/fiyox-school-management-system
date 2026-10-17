@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/audit-logs", tags=["audit"])
 @router.get("")
 async def list_audit_logs(
     db: DbDep,
-    user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN))],
+    user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN, Role.PRINCIPAL))],
     limit: int = Query(50, le=200),
     table_name: str | None = Query(None),
 ):

@@ -6,7 +6,7 @@ import { api, ApiError } from "@/lib/api";
 type SchoolRow = {
   id: string; name: string; slug: string; state: string | null;
   phone: string | null; students: number;
-  admins: number; bursars: number; teachers: number; parents: number;
+  admins: number; principals: number; bursars: number; teachers: number; parents: number;
   active_accounts: number;
   created_at: string | null;
 };
@@ -31,6 +31,9 @@ export default function SchoolsConsole() {
   });
   // shown exactly once after creation — the credentials you hand to the school
   const [handover, setHandover] = useState<{ school: string; email: string; password: string } | null>(null);
+  // add-account panel (create a Principal / Admin / Bursar for a school)
+  const [accountFor, setAccountFor] = useState<SchoolRow | null>(null);
+  const [acctForm, setAcctForm] = useState({ role: "principal", first_name: "", last_name: "", email: "" });
 
   const [demoReqs, setDemoReqs] = useState<DemoReq[] | null>(null);
 
@@ -85,6 +88,28 @@ export default function SchoolsConsole() {
       await load();
     } catch (e) {
       setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not offboard the school." });
+    } finally { setBusy(false); }
+  }
+
+  async function createAccount() {
+    if (!accountFor) return;
+    const { role, first_name, last_name, email } = acctForm;
+    if (!first_name.trim() || !last_name.trim() || !email.trim()) {
+      setNotice({ kind: "err", text: "Name and email are required." });
+      return;
+    }
+    setBusy(true); setNotice(null);
+    try {
+      const r = await api<{ email: string; password: string; role: string }>(
+        `/api/schools/${accountFor.id}/accounts`,
+        { method: "POST", body: JSON.stringify({ role, first_name, last_name, email }) });
+      const label = role === "principal" ? "Principal" : role === "bursar" ? "Bursar" : "Admin";
+      setHandover({ school: `${accountFor.name} · ${label}`, email: r.email, password: r.password });
+      setAccountFor(null);
+      setAcctForm({ role: "principal", first_name: "", last_name: "", email: "" });
+      await load();
+    } catch (e) {
+      setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not create the account." });
     } finally { setBusy(false); }
   }
 
@@ -156,6 +181,42 @@ export default function SchoolsConsole() {
           <button onClick={() => setHandover(null)}
                   className="text-xs text-ink-soft underline underline-offset-2">
             I have copied these — dismiss
+          </button>
+        </section>
+      )}
+
+      {/* add an account (principal / admin / bursar) to a school */}
+      {accountFor && (
+        <section className="rounded-lg border border-brass bg-brass/10 p-4 space-y-3 max-w-2xl">
+          <div className="flex items-baseline justify-between gap-2">
+            <p className="text-sm font-medium">Add an account to {accountFor.name}</p>
+            <button onClick={() => setAccountFor(null)}
+                    className="text-xs text-ink-soft underline underline-offset-2">Close</button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <select value={acctForm.role}
+                    onChange={(e) => setAcctForm({ ...acctForm, role: e.target.value })}
+                    className="rounded border border-line px-2 py-1.5 text-sm">
+              <option value="principal">Principal</option>
+              <option value="school_admin">Admin</option>
+              <option value="bursar">Bursar</option>
+            </select>
+            <input value={acctForm.email} type="email" placeholder="Email"
+                   onChange={(e) => setAcctForm({ ...acctForm, email: e.target.value })}
+                   className="rounded border border-line px-2 py-1.5 text-sm" />
+            <input value={acctForm.first_name} placeholder="First name"
+                   onChange={(e) => setAcctForm({ ...acctForm, first_name: e.target.value })}
+                   className="rounded border border-line px-2 py-1.5 text-sm" />
+            <input value={acctForm.last_name} placeholder="Last name"
+                   onChange={(e) => setAcctForm({ ...acctForm, last_name: e.target.value })}
+                   className="rounded border border-line px-2 py-1.5 text-sm" />
+          </div>
+          <p className="text-xs text-ink-soft">
+            A one-time password is generated and shown once, for you to hand over.
+          </p>
+          <button onClick={createAccount} disabled={busy}
+                  className="rounded-md bg-ink text-white px-4 py-2 text-sm font-medium hover:bg-ink-soft disabled:opacity-50">
+            {busy ? "Creating…" : "Create account"}
           </button>
         </section>
       )}
@@ -245,7 +306,11 @@ export default function SchoolsConsole() {
                     <td className="px-3 py-2 text-right tabular">{s.admins}</td>
                     <td className="px-3 py-2 text-right tabular">{s.bursars}</td>
                     <td className="px-3 py-2 text-xs text-ink-soft">{s.created_at ?? "—"}</td>
-                    <td className="px-3 py-2 text-right">
+                    <td className="px-3 py-2 text-right whitespace-nowrap">
+                      <button onClick={() => { setAccountFor(s); setNotice(null); }} disabled={busy}
+                              className="text-ink underline underline-offset-2 hover:text-ink-soft disabled:opacity-50 text-xs mr-3">
+                        Add account
+                      </button>
                       <button onClick={() => offboardSchool(s)} disabled={busy}
                               className="text-sanction underline underline-offset-2 hover:opacity-70 disabled:opacity-50 text-xs">
                         Offboard

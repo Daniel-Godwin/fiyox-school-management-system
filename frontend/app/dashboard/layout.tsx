@@ -8,11 +8,11 @@ import { ToastProvider } from "@/components/Toast";
 
 const NAV: { href: string; label: string; roles: User["role"][] }[] = [
   { href: "/dashboard", label: "Overview",
-    roles: ["super_admin", "school_admin", "bursar", "teacher", "student", "parent"] },
+    roles: ["super_admin", "school_admin", "principal", "bursar", "teacher", "student", "parent"] },
   { href: "/dashboard/schools", label: "Schools",
     roles: ["super_admin"] },
   { href: "/dashboard/students", label: "Students",
-    roles: ["super_admin", "school_admin", "teacher", "bursar"] },
+    roles: ["super_admin", "school_admin", "principal", "teacher", "bursar"] },
   { href: "/dashboard/setup", label: "School setup",
     roles: ["super_admin", "school_admin"] },
   { href: "/dashboard/scores", label: "Score entry",
@@ -20,11 +20,11 @@ const NAV: { href: string; label: string; roles: User["role"][] }[] = [
   { href: "/dashboard/attendance", label: "Attendance",
     roles: ["super_admin", "school_admin", "teacher"] },
   { href: "/dashboard/results", label: "Results",
-    roles: ["super_admin", "school_admin", "teacher"] },
+    roles: ["super_admin", "school_admin", "principal", "teacher"] },
   { href: "/dashboard/timetable", label: "Timetable",
-    roles: ["super_admin", "school_admin", "teacher", "parent", "student"] },
+    roles: ["super_admin", "school_admin", "principal", "teacher", "parent", "student"] },
   { href: "/dashboard/fees", label: "Fees",
-    roles: ["super_admin", "school_admin", "bursar"] },
+    roles: ["super_admin", "school_admin", "principal", "bursar"] },
   { href: "/dashboard/end-of-term", label: "End of term",
     roles: ["super_admin", "school_admin"] },
   { href: "/dashboard/wards", label: "My wards",
@@ -32,7 +32,7 @@ const NAV: { href: string; label: string; roles: User["role"][] }[] = [
   { href: "/dashboard/users", label: "Users",
     roles: ["super_admin", "school_admin"] },
   { href: "/dashboard/account", label: "Account",
-    roles: ["super_admin", "school_admin", "bursar", "teacher", "student", "parent"] },
+    roles: ["super_admin", "school_admin", "principal", "bursar", "teacher", "student", "parent"] },
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {

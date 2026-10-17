@@ -5,7 +5,7 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 export type User = {
   id: string;
   email: string;
-  role: "super_admin" | "school_admin" | "bursar" | "teacher" | "student" | "parent";
+  role: "super_admin" | "school_admin" | "principal" | "bursar" | "teacher" | "student" | "parent";
   first_name: string;
   last_name: string;
   school_id: string | null;
@@ -129,6 +129,7 @@ export async function downloadFile(path: string, fallbackName: string): Promise<
 export const ROLE_LABEL: Record<User["role"], string> = {
   super_admin: "Platform owner",
   school_admin: "School admin",
+  principal: "Principal",
   bursar: "Bursar",
   teacher: "Teacher",
   student: "Student",

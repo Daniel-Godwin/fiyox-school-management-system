@@ -147,7 +147,7 @@ async def compute(
 @router.get("/results", tags=["results"])
 async def list_results(
     db: DbDep,
-    user: Annotated[User, Depends(require_roles(Role.TEACHER, Role.SCHOOL_ADMIN))],
+    user: Annotated[User, Depends(require_roles(Role.TEACHER, Role.SCHOOL_ADMIN, Role.PRINCIPAL))],
     arm_id: str = Query(...),
     term_id: str = Query(...),
 ):
@@ -225,7 +225,7 @@ async def submit_results(
 @router.post("/results/approve", tags=["results"])
 async def approve_results(
     payload: ComputeIn, request: Request, db: DbDep,
-    user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN))],
+    user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN, Role.PRINCIPAL))],
 ):
     """Principal approves submitted results; they become publishable."""
     from datetime import datetime, timezone
@@ -258,7 +258,7 @@ async def approve_results(
 @router.post("/results/return", tags=["results"])
 async def return_results(
     payload: TermResultUpdate, request: Request, db: DbDep,
-    user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN))],
+    user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN, Role.PRINCIPAL))],
     arm_id: str = Query(...), term_id: str = Query(...),
 ):
     """Principal returns submitted results to the form teacher, with a reason."""
@@ -288,7 +288,7 @@ async def return_results(
 @router.post("/results/publish", tags=["results"])
 async def publish_results(
     payload: ComputeIn, request: Request, db: DbDep,
-    user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN))],
+    user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN, Role.PRINCIPAL))],
 ):
     """Publish an arm+term's results to parents — only those that are approved.
 
@@ -333,7 +333,7 @@ async def publish_results(
 @router.patch("/term-results/{term_result_id}", tags=["results"])
 async def update_term_result(
     term_result_id: str, payload: TermResultUpdate, request: Request, db: DbDep,
-    user: Annotated[User, Depends(require_roles(Role.TEACHER, Role.SCHOOL_ADMIN))],
+    user: Annotated[User, Depends(require_roles(Role.TEACHER, Role.SCHOOL_ADMIN, Role.PRINCIPAL))],
 ):
     school_id = tenant_scope(user)
     tr = await db.get(TermResult, term_result_id)
@@ -369,7 +369,7 @@ async def update_term_result(
 
 # ---------- View a report card (scoped by who's asking) ----------
 async def _can_view(db, user: User, student: Student) -> bool:
-    if user.role in (Role.SUPER_ADMIN, Role.SCHOOL_ADMIN, Role.TEACHER, Role.BURSAR):
+    if user.role in (Role.SUPER_ADMIN, Role.SCHOOL_ADMIN, Role.PRINCIPAL, Role.TEACHER, Role.BURSAR):
         return True
     if user.role == Role.STUDENT:
         return student.user_id == user.id
@@ -451,7 +451,7 @@ class CommentBankIn(BaseModel):
 @router.get("/comment-bank", tags=["results"])
 async def list_comment_bank(
     db: DbDep, user: Annotated[User, Depends(require_roles(
-        Role.TEACHER, Role.SCHOOL_ADMIN))],
+        Role.TEACHER, Role.SCHOOL_ADMIN, Role.PRINCIPAL))],
     audience: str | None = Query(None),
 ):
     school_id = tenant_scope(user)
@@ -469,7 +469,7 @@ async def list_comment_bank(
 @router.get("/comment-bank/suggest", tags=["results"])
 async def suggest_comments(
     db: DbDep, user: Annotated[User, Depends(require_roles(
-        Role.TEACHER, Role.SCHOOL_ADMIN))],
+        Role.TEACHER, Role.SCHOOL_ADMIN, Role.PRINCIPAL))],
     average: float = Query(...), audience: str = Query("form_teacher"),
 ):
     """Bank entries whose band contains this average — what the UI offers a
@@ -587,3 +587,45 @@ async def save_affective_grid(
                        ip_address=request.client.host if request.client else None)
     await db.commit()
     return {"saved": saved}
+
+
+@router.get("/results/approval-queue", tags=["results"])
+async def results_approval_queue(
+    db: DbDep,
+    user: Annotated[User, Depends(require_roles(
+        Role.SCHOOL_ADMIN, Role.PRINCIPAL, Role.SUPER_ADMIN))],
+    term_id: str | None = Query(None),
+):
+    """Arms whose results are submitted and waiting for the principal to approve."""
+    from app.models.academics import ClassArm, SchoolClass, Term
+    school_id = tenant_scope(user)
+    stmt = select(TermResult).where(
+        TermResult.school_id == school_id,
+        TermResult.approval_status == "submitted")
+    if term_id:
+        stmt = stmt.where(TermResult.term_id == term_id)
+    rows = (await db.execute(stmt)).scalars().all()
+
+    arms = {a.id: a for a in (await db.execute(select(ClassArm).where(
+        ClassArm.school_id == school_id))).scalars().all()}
+    classes = {c.id: c.name for c in (await db.execute(select(SchoolClass).where(
+        SchoolClass.school_id == school_id))).scalars().all()}
+    terms = {t.id: t for t in (await db.execute(select(Term).where(
+        Term.school_id == school_id))).scalars().all()}
+
+    agg: dict[tuple, int] = {}
+    for tr in rows:
+        agg[(tr.arm_id, tr.term_id)] = agg.get((tr.arm_id, tr.term_id), 0) + 1
+
+    out = []
+    for (arm_id, t_id), count in agg.items():
+        a = arms.get(arm_id)
+        t = terms.get(t_id)
+        out.append({
+            "arm_id": arm_id, "term_id": t_id,
+            "arm_label": (f"{classes.get(a.class_id, '')} {a.name}".strip() if a else ""),
+            "term_label": (f"{str(t.name).split('.')[-1].title()} term" if t else ""),
+            "count": count,
+        })
+    out.sort(key=lambda r: r["arm_label"])
+    return {"count": len(out), "arms": out}

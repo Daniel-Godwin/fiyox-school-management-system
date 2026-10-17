@@ -23,6 +23,8 @@ from app.services.receipt_pdf import build_receipt_pdf
 router = APIRouter(prefix="/api/fees", tags=["fees"])
 
 FinanceRoles = Depends(require_roles(Role.BURSAR, Role.SCHOOL_ADMIN))
+# read-only finance view also open to the principal (oversight)
+FinanceView = Depends(require_roles(Role.BURSAR, Role.SCHOOL_ADMIN, Role.PRINCIPAL))
 
 
 # ---------- Categories ----------
@@ -102,7 +104,7 @@ async def generate(
 
 @router.get("/invoices", response_model=list[InvoiceOut])
 async def list_invoices(
-    db: DbDep, user: Annotated[User, FinanceRoles],
+    db: DbDep, user: Annotated[User, FinanceView],
     term_id: str | None = Query(None),
     student_id: str | None = Query(None),
     status_filter: InvoiceStatus | None = Query(None, alias="status"),
@@ -150,7 +152,7 @@ async def _invoice_items(db, school_id: str, invoice_id: str) -> list[dict]:
 
 @router.get("/payments/{payment_id}/receipt")
 async def payment_receipt(
-    payment_id: str, db: DbDep, user: Annotated[User, FinanceRoles],
+    payment_id: str, db: DbDep, user: Annotated[User, FinanceView],
     download: bool = Query(False, description="save the file instead of opening it"),
 ):
     school_id = tenant_scope(user)
@@ -190,7 +192,7 @@ async def payment_receipt(
 # ---------- Bursar summary ----------
 @router.get("/summary")
 async def fees_summary(
-    db: DbDep, user: Annotated[User, FinanceRoles],
+    db: DbDep, user: Annotated[User, FinanceView],
     term_id: str = Query(...),
 ):
     """One-look dashboard numbers for a term: expected vs collected vs outstanding,
@@ -539,7 +541,7 @@ async def reissue_invoices(
 # ---------- Daily reconciliation: paper vs system ----------
 @router.get("/reconciliation")
 async def reconciliation(
-    db: DbDep, user: Annotated[User, FinanceRoles],
+    db: DbDep, user: Annotated[User, FinanceView],
     date: str = Query(..., description="YYYY-MM-DD"),
 ):
     """The end-of-day count: every payment recorded on a date, grouped by
@@ -613,7 +615,7 @@ async def reconciliation(
 
 @router.get("/invoices/{invoice_id}/payments")
 async def invoice_payments(
-    invoice_id: str, db: DbDep, user: Annotated[User, FinanceRoles],
+    invoice_id: str, db: DbDep, user: Annotated[User, FinanceView],
 ):
     """Every payment recorded against one invoice, newest first.
 
@@ -686,7 +688,7 @@ async def _receipt_bytes_for(db, school_id: str, pay: Payment) -> tuple[str, byt
 
 @router.get("/receipts.zip")
 async def bulk_receipts(
-    db: DbDep, user: Annotated[User, FinanceRoles],
+    db: DbDep, user: Annotated[User, FinanceView],
     date: str | None = Query(None, description="all receipts for one day, YYYY-MM-DD"),
     invoice_id: str | None = Query(None, description="all receipts on one invoice"),
     term_id: str | None = Query(None, description="all receipts for a whole term"),
@@ -963,7 +965,7 @@ async def _debtor_rows(db, school_id: str, term_id: str | None, arm_id: str | No
 
 @router.get("/debtors")
 async def list_debtors(
-    db: DbDep, user: Annotated[User, FinanceRoles],
+    db: DbDep, user: Annotated[User, FinanceView],
     term_id: str | None = Query(None, description="one term, or all terms if omitted"),
     arm_id: str | None = Query(None, description="restrict to one class arm"),
 ):
@@ -981,7 +983,7 @@ async def list_debtors(
 
 @router.get("/debtors.xlsx")
 async def export_debtors(
-    db: DbDep, user: Annotated[User, FinanceRoles],
+    db: DbDep, user: Annotated[User, FinanceView],
     term_id: str | None = Query(None), arm_id: str | None = Query(None),
 ):
     """The debtors list as an Excel file the bursar can print or send."""

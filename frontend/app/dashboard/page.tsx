@@ -13,6 +13,8 @@ type SetupState = {
   terms: boolean; classes: boolean; subjects: boolean;
   students: boolean; teachers: boolean; fees: boolean;
 };
+type ApprovalArm = { arm_id: string; term_id: string; arm_label: string; term_label: string; count: number };
+type ApprovalQueue = { count: number; arms: ApprovalArm[] };
 
 function naira(n: number) {
   return "₦" + n.toLocaleString("en-NG", { maximumFractionDigits: 0 });
@@ -56,6 +58,7 @@ export default function Overview() {
   const [wards, setWards] = useState<Ward[] | null>(null);
   const [atRisk, setAtRisk] = useState<number | null>(null);
   const [setup, setSetup] = useState<SetupState | null>(null);
+  const [approvals, setApprovals] = useState<ApprovalQueue | null>(null);
 
   useEffect(() => {
     me().then((u) => {
@@ -65,17 +68,20 @@ export default function Overview() {
       api<Term[]>("/api/academics/terms").then((ts) => {
         const cur = ts.find((t) => t.is_current) ?? ts[0] ?? null;
         setTerm(cur);
-        if (cur && ["super_admin", "school_admin", "bursar"].includes(u.role)) {
+        if (cur && ["super_admin", "school_admin", "principal", "bursar"].includes(u.role)) {
           api<FeeSummary>(`/api/fees/summary?term_id=${cur.id}`).then(setFees).catch(() => {});
         }
-        if (cur && ["super_admin", "school_admin", "teacher"].includes(u.role)) {
+        if (cur && ["super_admin", "school_admin", "principal", "teacher"].includes(u.role)) {
           api<unknown[]>(`/api/ai/at-risk?term_id=${cur.id}`)
             .then((r) => setAtRisk(r.length)).catch(() => {});
         }
       }).catch(() => {});
 
-      if (staff) {
+      if (staff || u.role === "principal") {
         api<Student[]>("/api/students").then((s) => setStudents(s.length)).catch(() => {});
+      }
+      if (u.role === "principal") {
+        api<ApprovalQueue>("/api/results/approval-queue").then(setApprovals).catch(() => {});
       }
       if (["super_admin", "school_admin"].includes(u.role)) {
         // is this a brand-new school? compute the setup checklist
@@ -110,6 +116,7 @@ export default function Overview() {
   const staff = ["super_admin", "school_admin", "teacher", "bursar"].includes(user.role);
   const isAdmin = ["super_admin", "school_admin"].includes(user.role);
   const isBursar = ["super_admin", "school_admin", "bursar"].includes(user.role);
+  const isPrincipal = user.role === "principal";
   const family = user.role === "parent" || user.role === "student";
 
   return (
@@ -119,7 +126,7 @@ export default function Overview() {
         <p className="text-ink-soft text-sm mt-1">
           {term
             ? <>You are in the <b>{term.name} term</b>, {term.session} session.</>
-            : staff
+            : (staff || isPrincipal)
               ? "Here is where your school's day-to-day work happens."
               : "Follow your ward's results, fees and attendance here."}
           {term?.next_term_begins && (
@@ -201,6 +208,57 @@ export default function Overview() {
             {isAdmin && <QuickLink href="/dashboard/end-of-term" label="End of term" />}
           </div>
         </section>
+      )}
+
+      {isPrincipal && (
+        <>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <StatCard href="/dashboard/students" label="Students"
+                      value={students?.toLocaleString() ?? "—"} hint="School roll →" />
+            {fees && (
+              <StatCard href="/dashboard/fees" label="Fees collected"
+                        value={`${Math.round(fees.collection_rate)}%`}
+                        tone={fees.collection_rate >= 70 ? "ledger" : "brass"}
+                        hint={`${naira(fees.collected)} of ${naira(fees.expected)} →`} />
+            )}
+            <StatCard href="/dashboard/results" label="Awaiting approval"
+                      value={approvals ? approvals.count.toString() : "—"}
+                      tone={approvals && approvals.count > 0 ? "brass" : "ledger"}
+                      hint={approvals && approvals.count > 0 ? "Review & approve →" : "Nothing waiting"} />
+          </div>
+
+          {approvals && approvals.count > 0 && (
+            <section className="rounded-xl border border-brass bg-brass/10 p-5">
+              <h2 className="text-base font-semibold">Results awaiting your approval</h2>
+              <p className="text-sm text-ink-soft mt-1 mb-3">
+                These classes have submitted results. Review and approve them before they reach parents.
+              </p>
+              <ul className="space-y-2">
+                {approvals.arms.map((a) => (
+                  <li key={a.arm_id + a.term_id}>
+                    <Link href="/dashboard/results"
+                          className="flex items-center justify-between gap-3 rounded-lg border border-line bg-white px-3 py-2.5 text-sm hover:border-ink">
+                      <span><b>{a.arm_label}</b> — {a.term_label}</span>
+                      <span className="text-ink-soft">{a.count} result{a.count === 1 ? "" : "s"} →</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          <section>
+            <h2 className="text-sm font-semibold text-ink-soft uppercase tracking-wide mb-3">
+              Quick actions
+            </h2>
+            <div className="flex flex-wrap gap-2">
+              <QuickLink href="/dashboard/results" label="Approve results" />
+              <QuickLink href="/dashboard/fees" label="Fees & debtors" />
+              <QuickLink href="/dashboard/students" label="Students" />
+              <QuickLink href="/dashboard/timetable" label="Timetable" />
+            </div>
+          </section>
+        </>
       )}
 
       {family && (

@@ -25,7 +25,7 @@ ROLE_TARGET = {
 @router.post("", response_model=AnnouncementOut, status_code=status.HTTP_201_CREATED)
 async def create_announcement(
     payload: AnnouncementIn, request: Request, db: DbDep,
-    user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN))],
+    user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN, Role.PRINCIPAL))],
 ):
     school_id = tenant_scope(user)
     ann = Announcement(

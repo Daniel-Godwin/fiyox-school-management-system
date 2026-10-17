@@ -14,7 +14,7 @@ from app.services.export import build_school_export
 
 router = APIRouter(prefix="/api/export", tags=["export"])
 
-AdminOnly = Depends(require_roles(Role.SCHOOL_ADMIN))
+AdminOnly = Depends(require_roles(Role.SCHOOL_ADMIN, Role.PRINCIPAL))
 
 
 @router.get("/school.xlsx")

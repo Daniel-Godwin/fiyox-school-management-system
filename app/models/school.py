@@ -7,7 +7,8 @@ from app.models.base import Base, UUIDMixin, TimestampMixin
 
 class Role(str, enum.Enum):
     SUPER_ADMIN = "super_admin"      # you: the platform owner, no school
-    SCHOOL_ADMIN = "school_admin"    # proprietor / principal
+    SCHOOL_ADMIN = "school_admin"    # operations: setup, students, staff, data entry
+    PRINCIPAL = "principal"          # oversight: approves results, monitors fees/analytics
     BURSAR = "bursar"                # fees & payments
     TEACHER = "teacher"              # subject and/or form teacher
     STUDENT = "student"

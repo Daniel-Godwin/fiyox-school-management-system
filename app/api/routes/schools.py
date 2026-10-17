@@ -6,8 +6,18 @@ from app.core.deps import DbDep, require_roles
 from app.core.security import hash_password
 from app.models.school import School, User, Role
 from app.schemas import SchoolCreate, SchoolOut
+import secrets as _secrets
+from pydantic import BaseModel, EmailStr
 
 router = APIRouter(prefix="/api/schools", tags=["schools"])
+
+
+class SchoolAccountIn(BaseModel):
+    role: Role
+    email: EmailStr
+    first_name: str
+    last_name: str
+    password: str | None = None
 
 
 @router.post("", response_model=SchoolOut, status_code=status.HTTP_201_CREATED)
@@ -39,6 +49,38 @@ async def create_school(
     return school
 
 
+@router.post("/{school_id}/accounts", tags=["schools"], status_code=status.HTTP_201_CREATED)
+async def create_school_account(
+    school_id: str, payload: SchoolAccountIn, db: DbDep,
+    owner: Annotated[User, Depends(require_roles(Role.SUPER_ADMIN))],
+):
+    """Platform owner creates a Principal / Admin / Bursar for a school, and
+    receives one-time sign-in credentials to hand over."""
+    if payload.role not in (Role.PRINCIPAL, Role.SCHOOL_ADMIN, Role.BURSAR):
+        raise HTTPException(status_code=400,
+                            detail="Role must be principal, school_admin or bursar")
+    school = await db.get(School, school_id)
+    if not school or school.deleted_at:
+        raise HTTPException(status_code=404, detail="School not found")
+
+    email = str(payload.email).strip().lower()
+    dup = (await db.execute(select(User).where(
+        User.school_id == school_id, User.email == email))).scalars().first()
+    if dup:
+        raise HTTPException(status_code=409,
+                            detail="A user with this email already exists in this school")
+
+    pwd = payload.password or _secrets.token_urlsafe(8)
+    user = User(school_id=school_id, email=email,
+                hashed_password=hash_password(pwd), role=payload.role,
+                first_name=payload.first_name.strip(),
+                last_name=payload.last_name.strip())
+    db.add(user)
+    await db.commit()
+    return {"id": user.id, "email": email,
+            "role": getattr(payload.role, "value", payload.role), "password": pwd}
+
+
 # ---------- School settings (school admin manages their own school) ----------
 from fastapi import Request
 from pydantic import BaseModel
@@ -63,7 +105,7 @@ class SchoolSettingsIn(BaseModel):
 async def my_school(
     db: DbDep,
     user: Annotated[User, Depends(require_roles(
-        Role.SCHOOL_ADMIN, Role.BURSAR, Role.TEACHER))],
+        Role.SCHOOL_ADMIN, Role.BURSAR, Role.TEACHER, Role.PRINCIPAL))],
 ):
     school_id = tenant_scope(user)
     school = await db.get(School, school_id)
@@ -193,7 +235,7 @@ async def list_schools(
         users = (await db.execute(select(User).where(
             User.school_id == s.id,
             User.deleted_at.is_(None)))).scalars().all()
-        roles = {"school_admin": 0, "bursar": 0, "teacher": 0,
+        roles = {"school_admin": 0, "principal": 0, "bursar": 0, "teacher": 0,
                  "parent": 0, "student": 0}
         active = 0
         for u in users:
@@ -206,7 +248,8 @@ async def list_schools(
             "id": s.id, "name": s.name, "slug": s.slug,
             "state": s.state, "phone": s.phone,
             "students": len(students),
-            "admins": roles["school_admin"], "bursars": roles["bursar"],
+            "admins": roles["school_admin"], "principals": roles["principal"],
+            "bursars": roles["bursar"],
             "teachers": roles["teacher"], "parents": roles["parent"],
             "active_accounts": active,
             "created_at": str(s.created_at)[:10] if s.created_at else None,

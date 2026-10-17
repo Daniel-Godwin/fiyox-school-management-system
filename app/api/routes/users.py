@@ -34,6 +34,9 @@ async def create_user(
 
     if payload.role == Role.SUPER_ADMIN:
         raise HTTPException(status_code=403, detail="Cannot create platform admins")
+    if payload.role == Role.PRINCIPAL:
+        raise HTTPException(status_code=403,
+                            detail="Principal accounts are created by the platform owner")
 
     exists = (await db.execute(select(User).where(
         User.school_id == school_id, User.email == payload.email))).scalars().first()
