@@ -188,20 +188,47 @@ async def build_school_export(db: AsyncSession, school_id: str) -> bytes:
              str(getattr(a.status, "value", a.status))]
             for a in sorted(att, key=lambda x: str(x.date))])
 
-    # ---- About sheet (provenance) --------------------------------------------------
+    # ---- About sheet (provenance + contents) ---------------------------------------
+    data_titles = ["Students", "Guardians", "Staff", "Results", "Subject scores",
+                   "Invoices", "Payments", "Attendance"]
+
     about = wb.create_sheet("About this export", 0)
     about["A1"] = "Fiyox School Management System — full data export"
     about["A1"].font = Font(bold=True, size=13)
     about["A3"] = "Exported at (UTC):"
     about["B3"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
-    about["A4"] = "Sheets:"
-    about["B4"] = ("Students, Guardians, Staff, Results, Subject scores, "
-                   "Invoices, Payments, Attendance")
-    about["A6"] = ("This file is plain tabular data — no formulas or macros — and "
-                   "opens in Excel, Google Sheets, or LibreOffice. Your school's "
-                   "records belong to your school.")
-    about.column_dimensions["A"].width = 22
+    about["A5"] = ("👉 Your records are on the tabs below (Students, Guardians, …). "
+                   "Click a tab at the bottom of this window to see them.")
+    about["A5"].font = Font(bold=True, color="1D3557")
+
+    # contents table: each sheet and how many records it holds, so the very
+    # first thing the reader sees is proof the data is present
+    about["A7"] = "Sheet"
+    about["B7"] = "Records"
+    for c in (about["A7"], about["B7"]):
+        c.fill = HEADER_FILL
+        c.font = HEADER_FONT
+    row = 8
+    total = 0
+    for title in data_titles:
+        count = max(0, wb[title].max_row - 1)   # minus the header row
+        total += count
+        about.cell(row=row, column=1, value=title)
+        about.cell(row=row, column=2, value=count)
+        row += 1
+    about.cell(row=row, column=1, value="Total records").font = Font(bold=True)
+    about.cell(row=row, column=2, value=total).font = Font(bold=True)
+
+    about.cell(row=row + 2, column=1,
+               value=("This file is plain tabular data — no formulas or macros — and "
+                      "opens in Excel, Google Sheets, or LibreOffice. Your school's "
+                      "records belong to your school."))
+    about.column_dimensions["A"].width = 24
     about.column_dimensions["B"].width = 70
+
+    # open the workbook on the Students tab, not this summary, so it never looks
+    # empty on first glance
+    wb.active = wb.index(wb["Students"])
 
     buf = io.BytesIO()
     wb.save(buf)

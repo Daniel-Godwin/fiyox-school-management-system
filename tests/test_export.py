@@ -48,6 +48,17 @@ async def test_export_contains_every_sheet_and_the_actual_data(ctx):
     chinedu = next(row for row in results[1:] if row[3] == "Chinedu Eze")
     assert chinedu[4] == 68             # grand total made it into the file
 
+    # the workbook must open on the data, not the empty-looking summary sheet
+    assert wb.active.title == "Students"
+
+    # the About sheet lists each sheet's record count, so the file never
+    # looks empty even if the reader lands there first
+    about = [row for row in wb["About this export"].values]
+    flat = [str(c) for row in about for c in row if c is not None]
+    assert "Records" in flat
+    total_row = next(row for row in about if row and row[0] == "Total records")
+    assert isinstance(total_row[1], int) and total_row[1] > 0
+
 
 async def test_export_is_admin_only(ctx):
     client, ids = ctx
