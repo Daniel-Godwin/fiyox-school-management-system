@@ -268,6 +268,29 @@ async def test_practice_cbt_does_not_touch_result_sheet(ctx):
     assert se is None
 
 
+async def test_one_cbt_per_column_per_subject(ctx):
+    client, ids = ctx
+    th = await _teacher(client)
+    comp = ids["component_ids"]
+    # first test claims "Test 1" for Maths this term
+    await _make_exam(client, ids, th, component_id=comp[0])
+    # a second test for the same subject+term+column is refused
+    r = await client.post("/api/cbt/exams", headers=th, json={
+        "title": "Another Maths test", "subject_id": ids["subject_id"],
+        "arm_id": ids["arm_id"], "term_id": ids["term_id"], "component_id": comp[0]})
+    assert r.status_code == 409
+    assert "already records" in r.json()["detail"]
+    # a different column is fine
+    r2 = await client.post("/api/cbt/exams", headers=th, json={
+        "title": "Maths test 2", "subject_id": ids["subject_id"],
+        "arm_id": ids["arm_id"], "term_id": ids["term_id"], "component_id": comp[1]})
+    assert r2.status_code == 201
+    # patching that second test onto the taken column is also refused
+    r3 = await client.patch(f"/api/cbt/exams/{r2.json()['id']}", headers=th,
+                            json={"component_id": comp[0]})
+    assert r3.status_code == 409
+
+
 async def test_unknown_component_rejected(ctx):
     client, ids = ctx
     th = await _teacher(client)

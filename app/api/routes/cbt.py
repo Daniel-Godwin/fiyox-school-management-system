@@ -148,6 +148,32 @@ async def _validate_component(db, school_id: str, component_id: str | None):
         raise HTTPException(422, "Unknown assessment component")
 
 
+async def _assert_component_free(db, school_id: str, subject_id: str, term_id: str,
+                                 component_id: str | None, exclude_exam_id: str | None):
+    """Only one CBT may feed a given result column for a subject in a term.
+
+    Two tests both writing into, say, Maths "Test 1" this term would overwrite
+    each other's marks, so the second mapping is refused with a message naming
+    the test that already holds the column. Null (practice) never clashes.
+    """
+    if not component_id:
+        return
+    clash = (await db.execute(select(CBTExam).where(
+        CBTExam.school_id == school_id,
+        CBTExam.subject_id == subject_id,
+        CBTExam.term_id == term_id,
+        CBTExam.component_id == component_id,
+        CBTExam.deleted_at.is_(None)))).scalars().first()
+    if clash is not None and clash.id != exclude_exam_id:
+        comp = await db.get(AssessmentComponent, component_id)
+        col = comp.name if comp else "that column"
+        raise HTTPException(
+            409,
+            f"“{clash.title}” already records into {col} for this subject this "
+            f"term. Pick a different column, or set that test to “practice only” "
+            f"first.")
+
+
 # ==================================================================
 # Authoring
 # ==================================================================
@@ -166,6 +192,8 @@ async def create_exam(payload: ExamIn, request: Request, db: DbDep,
             db, school_id, user.id, payload.subject_id, payload.arm_id):
         raise HTTPException(403, "You can only create tests for classes you teach")
     await _validate_component(db, school_id, payload.component_id)
+    await _assert_component_free(db, school_id, payload.subject_id,
+                                 payload.term_id, payload.component_id, None)
 
     ex = CBTExam(school_id=school_id, status=EXAM_DRAFT,
                  created_by=user.id, updated_by=user.id,
@@ -233,6 +261,8 @@ async def update_exam(exam_id: str, payload: ExamPatch, db: DbDep,
     data = payload.model_dump(exclude_unset=True)
     if "component_id" in data:
         await _validate_component(db, school_id, data["component_id"])
+        await _assert_component_free(db, school_id, ex.subject_id, ex.term_id,
+                                     data["component_id"], exclude_exam_id=ex.id)
     for k, v in data.items():
         setattr(ex, k, v)
     ex.updated_by = user.id
