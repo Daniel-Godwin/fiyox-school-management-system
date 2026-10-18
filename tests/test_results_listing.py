@@ -29,6 +29,22 @@ async def test_results_listing_ranked(ctx):
     assert all(r["class_size"] == 3 for r in rows)
 
 
+async def test_roster_shows_uncomputed_students(ctx):
+    """A class with no computed results yet still lists its current roster, so a
+    freshly promoted class is never invisible on the Results page."""
+    client, ids = ctx
+    h = await headers(client, "admin@gss-ikeja.ng", "admin123")
+    # nothing computed — straight to the listing
+    rows = (await client.get("/api/results", headers=h, params={
+        "arm_id": ids["arm_id"], "term_id": ids["term_id"]})).json()
+    assert len(rows) == 3                       # the whole current roster
+    assert all(r["computed"] is False for r in rows)
+    assert all(r["average"] is None for r in rows)
+    assert all(r["approval_status"] == "not_computed" for r in rows)
+    names = {r["name"] for r in rows}
+    assert "Chinedu Eze" in names
+
+
 async def test_bulk_publish_flips_all_and_is_idempotent(ctx):
     client, ids = ctx
     h = await headers(client, "admin@gss-ikeja.ng", "admin123")

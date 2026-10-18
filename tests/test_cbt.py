@@ -218,6 +218,65 @@ async def test_student_only_sees_own_class_exams(ctx):
     assert r.status_code == 403
 
 
+async def _score_entry(ids, student_id, component_id):
+    """Read a student's ScoreEntry for a component straight from the DB."""
+    from app.models.results import ScoreEntry
+    TestSession = ids["session_factory"]
+    async with TestSession() as db:
+        return (await db.execute(select(ScoreEntry).where(
+            ScoreEntry.student_id == student_id,
+            ScoreEntry.component_id == component_id))).scalars().first()
+
+
+async def test_cbt_records_scaled_score_to_result_sheet(ctx):
+    client, ids = ctx
+    th = await _teacher(client)
+    comp_id = ids["component_ids"][0]          # "Test 1", max 10
+    exam_id = await _make_exam(client, ids, th, component_id=comp_id)
+    qmap = await _add_questions(client, th, exam_id)   # total 6 marks
+    await client.post(f"/api/cbt/exams/{exam_id}/publish", headers=th)
+
+    sh = await _student_login(client, ids)
+    attempt = (await client.post(f"/api/cbt/exams/{exam_id}/start", headers=sh)).json()["attempt_id"]
+    # 4 of 6 marks: single wrong, boolean right, short right, multiple incomplete
+    answers = {qmap["single"]: "a", qmap["boolean"]: "true",
+               qmap["short"]: "eight", qmap["multiple"]: ["a"]}
+    body = (await client.post(f"/api/cbt/attempts/{attempt}/submit", headers=sh,
+                              json={"answers": answers})).json()
+    assert body["recorded_to_results"] is True
+    assert body["score"] == 2  # 4 of 6... single(0)+bool(1)+short(1)+multi(0)=2
+
+    # 2/6 = 33.3% of a 10-mark column -> 3.33
+    se = await _score_entry(ids, ids["student_ids"][0], comp_id)
+    assert se is not None
+    assert se.score == round((2 / 6) * 10, 2)   # 3.33
+
+
+async def test_practice_cbt_does_not_touch_result_sheet(ctx):
+    client, ids = ctx
+    th = await _teacher(client)
+    exam_id = await _make_exam(client, ids, th)     # no component -> practice
+    await _add_questions(client, th, exam_id)
+    await client.post(f"/api/cbt/exams/{exam_id}/publish", headers=th)
+
+    sh = await _student_login(client, ids)
+    attempt = (await client.post(f"/api/cbt/exams/{exam_id}/start", headers=sh)).json()["attempt_id"]
+    body = (await client.post(f"/api/cbt/attempts/{attempt}/submit", headers=sh,
+                              json={"answers": {}})).json()
+    assert body["recorded_to_results"] is False
+    se = await _score_entry(ids, ids["student_ids"][0], ids["component_ids"][0])
+    assert se is None
+
+
+async def test_unknown_component_rejected(ctx):
+    client, ids = ctx
+    th = await _teacher(client)
+    r = await client.post("/api/cbt/exams", headers=th, json={
+        "title": "x", "subject_id": ids["subject_id"], "arm_id": ids["arm_id"],
+        "term_id": ids["term_id"], "component_id": "does-not-exist"})
+    assert r.status_code == 422
+
+
 async def test_admin_sees_results_table(ctx):
     client, ids = ctx
     th = await _teacher(client)

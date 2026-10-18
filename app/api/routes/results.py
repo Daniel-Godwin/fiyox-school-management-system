@@ -151,35 +151,78 @@ async def list_results(
     arm_id: str = Query(...),
     term_id: str = Query(...),
 ):
-    """Computed term results for one arm, ranked — what a form teacher reviews
-    before publishing."""
+    """Results for one arm — the current class roster, each with their computed
+    term result if one exists.
+
+    The roster is the students who *currently* sit in the arm, so a freshly
+    promoted class shows up immediately (marked "not computed yet") instead of
+    appearing empty until results are computed. Any historical result for a
+    student who has since left the arm (promoted, transferred, graduated) is
+    still listed, so past report cards remain reachable here.
+    """
     school_id = tenant_scope(user)
     results = (await db.execute(select(TermResult).where(
         TermResult.school_id == school_id,
         TermResult.arm_id == arm_id,
         TermResult.term_id == term_id))).scalars().all()
+    by_student = {tr.student_id: tr for tr in results}
+
     students = {s.id: s for s in (await db.execute(select(Student).where(
         Student.school_id == school_id))).scalars().all()}
+
+    # current roster + anyone with a historical result for this arm+term
+    roster_ids = [s.id for s in students.values()
+                  if s.current_arm_id == arm_id and s.deleted_at is None]
+    student_ids = list(dict.fromkeys(roster_ids + list(by_student.keys())))
+
     rows = []
-    for tr in results:
-        st = students.get(tr.student_id)
-        rows.append({
-            "term_result_id": tr.id,
-            "student_id": tr.student_id,
-            "admission_number": st.admission_number if st else "",
-            "name": f"{st.first_name} {st.last_name}" if st else "Unknown",
-            "subjects_count": tr.subjects_count,
-            "grand_total": tr.grand_total,
-            "average": tr.average,
-            "position": tr.overall_position,
-            "class_size": tr.class_size,
-            "is_published": tr.is_published,
-            "approval_status": tr.approval_status,
-            "approval_note": tr.approval_note,
-            "form_teacher_comment": tr.form_teacher_comment,
-            "principal_comment": tr.principal_comment,
-        })
-    return sorted(rows, key=lambda r: r["position"])
+    for sid in student_ids:
+        st = students.get(sid)
+        tr = by_student.get(sid)
+        if tr is not None:
+            rows.append({
+                "term_result_id": tr.id,
+                "student_id": sid,
+                "admission_number": st.admission_number if st else "",
+                "name": f"{st.first_name} {st.last_name}" if st else "Unknown",
+                "subjects_count": tr.subjects_count,
+                "grand_total": tr.grand_total,
+                "average": tr.average,
+                "position": tr.overall_position,
+                "class_size": tr.class_size,
+                "is_published": tr.is_published,
+                "approval_status": tr.approval_status,
+                "approval_note": tr.approval_note,
+                "form_teacher_comment": tr.form_teacher_comment,
+                "principal_comment": tr.principal_comment,
+                "computed": True,
+            })
+        else:
+            # on the roster but no result computed for this term yet
+            rows.append({
+                "term_result_id": None,
+                "student_id": sid,
+                "admission_number": st.admission_number if st else "",
+                "name": f"{st.first_name} {st.last_name}" if st else "Unknown",
+                "subjects_count": 0,
+                "grand_total": 0.0,
+                "average": None,
+                "position": 0,
+                "class_size": 0,
+                "is_published": False,
+                "approval_status": "not_computed",
+                "approval_note": "",
+                "form_teacher_comment": "",
+                "principal_comment": "",
+                "computed": False,
+            })
+
+    # computed results first (ranked by position), then the not-yet-computed
+    # students alphabetically, so the class reads sensibly.
+    rows.sort(key=lambda r: (not r["computed"],
+                             r["position"] if r["computed"] else 0,
+                             r["name"]))
+    return rows
 
 
 async def _arm_term_results(db, school_id: str, arm_id: str, term_id: str):

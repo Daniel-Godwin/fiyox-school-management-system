@@ -9,6 +9,7 @@ type Term = { id: string; name: string; session: string; is_current: boolean };
 type Arm = { id: string; label: string };
 type Subject = { id: string; name: string };
 type Assignment = { subject_id: string; arm_id: string };
+type Component = { id: string; name: string; max_score: number };
 
 export default function NewCBT() {
   const router = useRouter();
@@ -29,6 +30,8 @@ export default function NewCBT() {
   const [shuffle, setShuffle] = useState(true);
   const [showResults, setShowResults] = useState(true);
   const [instructions, setInstructions] = useState("");
+  const [components, setComponents] = useState<Component[]>([]);
+  const [componentId, setComponentId] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -38,9 +41,10 @@ export default function NewCBT() {
       api<Arm[]>("/api/academics/arms"),
       api<Subject[]>("/api/academics/subjects"),
       api<Assignment[]>("/api/users/assignments").catch(() => []),
-    ]).then(([u, t, a, s, asg]) => {
+      api<Component[]>("/api/assessment-components").catch(() => []),
+    ]).then(([u, t, a, s, asg, comps]) => {
       setRole(u.role);
-      setTerms(t); setArms(a); setSubjects(s); setAssignments(asg);
+      setTerms(t); setArms(a); setSubjects(s); setAssignments(asg); setComponents(comps);
       const cur = t.find((x) => x.is_current);
       if (cur) setTermId(cur.id);
     }).catch(() => err("Could not load class lists. Is the backend running?"));
@@ -69,6 +73,7 @@ export default function NewCBT() {
           duration_minutes: Number(duration), max_attempts: Number(maxAttempts),
           shuffle_questions: shuffle, show_results_immediately: showResults,
           instructions: instructions.trim(),
+          component_id: componentId || null,
         }),
       });
       router.push(`/dashboard/cbt/${exam.id}`);
@@ -139,6 +144,21 @@ export default function NewCBT() {
             <input type="number" min={1} className={field} value={maxAttempts}
                    onChange={(e) => setMaxAttempts(Number(e.target.value))} />
           </div>
+        </div>
+
+        <div>
+          <label className={label}>Counts towards (result sheet)</label>
+          <select className={field} value={componentId}
+                  onChange={(e) => setComponentId(e.target.value)}>
+            <option value="">Practice only — does not count</option>
+            {components.map((c) => (
+              <option key={c.id} value={c.id}>{c.name} (max {c.max_score})</option>
+            ))}
+          </select>
+          <p className="text-xs text-ink-soft mt-1">
+            When set, each student&apos;s score is scaled to this column and written
+            into their report card automatically on submit.
+          </p>
         </div>
 
         <div>

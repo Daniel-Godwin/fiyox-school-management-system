@@ -6,7 +6,7 @@ import { api, me, openPdf, User, ApiError } from "@/lib/api";
 type Term = { id: string; name: string; session: string; is_current: boolean };
 type Arm = { id: string; label: string };
 type Row = {
-  term_result_id: string;
+  term_result_id: string | null;
   form_teacher_comment?: string;
   principal_comment?: string;
   student_id: string;
@@ -14,12 +14,13 @@ type Row = {
   name: string;
   subjects_count: number;
   grand_total: number;
-  average: number;
+  average: number | null;
   position: number;
   class_size: number;
   is_published: boolean;
-  approval_status: "draft" | "submitted" | "approved";
+  approval_status: "draft" | "submitted" | "approved" | "not_computed";
   approval_note: string;
+  computed: boolean;
 };
 
 const ordinal = (n: number) =>
@@ -241,7 +242,8 @@ export default function ResultsPage() {
     }
   }
 
-  const unpublished = rows?.filter((r) => !r.is_published).length ?? 0;
+  const unpublished = rows?.filter((r) => r.computed && !r.is_published).length ?? 0;
+  const notComputed = rows?.filter((r) => !r.computed).length ?? 0;
   // the arm moves through the workflow together; derive one status for the controls
   const hasRows = !!rows && rows.length > 0;
   const anyDraft = rows?.some((r) => r.approval_status === "draft") ?? false;
@@ -409,8 +411,15 @@ export default function ResultsPage() {
 
           {rows && rows.length === 0 && (
             <p className="text-sm text-ink-soft border border-dashed border-line rounded-lg p-6 max-w-xl">
-              No computed results for this class yet.
-              {isAdmin ? " Enter scores, then use Compute results." : " Ask the school admin to compute them."}
+              No students in this class yet.
+            </p>
+          )}
+
+          {rows && rows.length > 0 && notComputed > 0 && (
+            <p className="text-sm text-ink-soft border border-dashed border-line rounded-lg p-3 max-w-2xl">
+              <span className="font-medium text-ink">{notComputed} student{notComputed === 1 ? "" : "s"}</span> in
+              this class {notComputed === 1 ? "has" : "have"} no computed result for this term yet
+              {isAdmin ? " — enter their scores, then use Compute results." : "."}
             </p>
           )}
 
@@ -431,7 +440,27 @@ export default function ResultsPage() {
                 </thead>
                 <tbody>
                   {rows.map((r, i) => (
-                  <Fragment key={r.term_result_id}>
+                  <Fragment key={r.student_id}>
+                    {!r.computed ? (
+                    <tr className={i % 2 ? "bg-paper" : "bg-card"}>
+                      <td className="px-3 py-2 text-ink-soft">—</td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        <span className="tabular text-ink-soft mr-2">{r.admission_number}</span>
+                        {r.name}
+                      </td>
+                      <td className="px-3 py-2 text-right text-ink-soft">—</td>
+                      <td className="px-3 py-2 text-right text-ink-soft">—</td>
+                      <td className="px-3 py-2 text-right text-ink-soft">—</td>
+                      <td className="px-3 py-2">
+                        <span className="inline-block rounded-full bg-brass/15 text-brass-ink px-2 py-0.5 text-xs font-medium">
+                          Not computed
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-right text-ink-soft text-xs">—</td>
+                      <td className="px-3 py-2 text-right text-ink-soft text-xs">No result yet</td>
+                    </tr>
+                    ) : (
+                    <>
                     <tr className={i % 2 ? "bg-paper" : "bg-card"}>
                       <td className="px-3 py-2 tabular font-medium">
                         {ordinal(r.position)}
@@ -532,6 +561,8 @@ export default function ResultsPage() {
                           </div>
                         </td>
                       </tr>
+                    )}
+                    </>
                     )}
                   </Fragment>
                   ))}

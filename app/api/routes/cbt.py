@@ -23,6 +23,7 @@ from app.core.deps import DbDep, CurrentUser, require_roles, tenant_scope
 from app.models.school import User, Role
 from app.models.student import Student
 from app.models.academics import ClassArm, SchoolClass, Subject
+from app.models.results import AssessmentComponent, ScoreEntry
 from app.models.cbt import (
     CBTExam, CBTQuestion, CBTAttempt,
     EXAM_DRAFT, EXAM_PUBLISHED, EXAM_CLOSED,
@@ -117,6 +118,9 @@ async def _label_maps(db, school_id: str):
         ClassArm.school_id == school_id))).scalars().all()}
     classes = {c.id: c.name for c in (await db.execute(select(SchoolClass).where(
         SchoolClass.school_id == school_id))).scalars().all()}
+    components = {c.id: c.name for c in (await db.execute(
+        select(AssessmentComponent).where(
+            AssessmentComponent.school_id == school_id))).scalars().all()}
 
     def arm_label(arm_id: str) -> str:
         a = arms.get(arm_id)
@@ -124,14 +128,24 @@ async def _label_maps(db, school_id: str):
             return ""
         return f"{classes.get(a.class_id, '')} {a.name}".strip()
 
-    return subjects, arm_label
+    return subjects, arm_label, components
 
 
-def _exam_out(ex: CBTExam, subjects: dict, arm_label) -> ExamOut:
+def _exam_out(ex: CBTExam, subjects: dict, arm_label, components: dict) -> ExamOut:
     o = ExamOut.model_validate(ex)
     o.subject_name = subjects.get(ex.subject_id)
     o.class_label = arm_label(ex.arm_id)
+    o.component_name = components.get(ex.component_id) if ex.component_id else None
     return o
+
+
+async def _validate_component(db, school_id: str, component_id: str | None):
+    """A test may only point at one of its own school's result-sheet columns."""
+    if not component_id:
+        return
+    comp = await db.get(AssessmentComponent, component_id)
+    if comp is None or comp.school_id != school_id:
+        raise HTTPException(422, "Unknown assessment component")
 
 
 # ==================================================================
@@ -151,6 +165,7 @@ async def create_exam(payload: ExamIn, request: Request, db: DbDep,
     if user.role == Role.TEACHER and not await teaches(
             db, school_id, user.id, payload.subject_id, payload.arm_id):
         raise HTTPException(403, "You can only create tests for classes you teach")
+    await _validate_component(db, school_id, payload.component_id)
 
     ex = CBTExam(school_id=school_id, status=EXAM_DRAFT,
                  created_by=user.id, updated_by=user.id,
@@ -162,8 +177,8 @@ async def create_exam(payload: ExamIn, request: Request, db: DbDep,
                        ip_address=request.client.host if request.client else None)
     await db.commit()
     await db.refresh(ex)
-    subjects, arm_label = await _label_maps(db, school_id)
-    out = ExamDetailOut.model_validate(_exam_out(ex, subjects, arm_label))
+    subjects, arm_label, components = await _label_maps(db, school_id)
+    out = ExamDetailOut.model_validate(_exam_out(ex, subjects, arm_label, components))
     out.instructions = ex.instructions
     out.questions = []
     return out
@@ -188,8 +203,8 @@ async def list_exams(db: DbDep, user: Annotated[User, ViewRoles]):
         rows = [e for e in rows
                 if (e.subject_id, e.arm_id) in pairs or e.created_by == user.id]
 
-    subjects, arm_label = await _label_maps(db, school_id)
-    return [_exam_out(e, subjects, arm_label) for e in rows]
+    subjects, arm_label, components = await _label_maps(db, school_id)
+    return [_exam_out(e, subjects, arm_label, components) for e in rows]
 
 
 @router.get("/exams/{exam_id}", response_model=ExamDetailOut)
@@ -199,8 +214,8 @@ async def get_exam(exam_id: str, db: DbDep, user: Annotated[User, ViewRoles]):
     # a teacher may only open the detail of exams they manage
     if user.role == Role.TEACHER:
         await _assert_can_manage(db, user, school_id, ex)
-    subjects, arm_label = await _label_maps(db, school_id)
-    out = ExamDetailOut.model_validate(_exam_out(ex, subjects, arm_label))
+    subjects, arm_label, components = await _label_maps(db, school_id)
+    out = ExamDetailOut.model_validate(_exam_out(ex, subjects, arm_label, components))
     out.instructions = ex.instructions
     out.questions = [QuestionOut.model_validate(q)
                      for q in await _questions(db, school_id, exam_id)]
@@ -216,13 +231,15 @@ async def update_exam(exam_id: str, payload: ExamPatch, db: DbDep,
     if ex.status == EXAM_PUBLISHED:
         raise HTTPException(409, "Close or unpublish the test before editing its settings")
     data = payload.model_dump(exclude_unset=True)
+    if "component_id" in data:
+        await _validate_component(db, school_id, data["component_id"])
     for k, v in data.items():
         setattr(ex, k, v)
     ex.updated_by = user.id
     await db.commit()
     await db.refresh(ex)
-    subjects, arm_label = await _label_maps(db, school_id)
-    return _exam_out(ex, subjects, arm_label)
+    subjects, arm_label, components = await _label_maps(db, school_id)
+    return _exam_out(ex, subjects, arm_label, components)
 
 
 @router.delete("/exams/{exam_id}", status_code=204)
@@ -318,8 +335,8 @@ async def publish_exam(exam_id: str, request: Request, db: DbDep,
                        ip_address=request.client.host if request.client else None)
     await db.commit()
     await db.refresh(ex)
-    subjects, arm_label = await _label_maps(db, school_id)
-    return _exam_out(ex, subjects, arm_label)
+    subjects, arm_label, components = await _label_maps(db, school_id)
+    return _exam_out(ex, subjects, arm_label, components)
 
 
 @router.post("/exams/{exam_id}/close", response_model=ExamOut)
@@ -331,8 +348,8 @@ async def close_exam(exam_id: str, db: DbDep, user: Annotated[User, AuthorRoles]
     ex.updated_by = user.id
     await db.commit()
     await db.refresh(ex)
-    subjects, arm_label = await _label_maps(db, school_id)
-    return _exam_out(ex, subjects, arm_label)
+    subjects, arm_label, components = await _label_maps(db, school_id)
+    return _exam_out(ex, subjects, arm_label, components)
 
 
 @router.get("/exams/{exam_id}/results")
@@ -401,7 +418,7 @@ async def available_exams(db: DbDep, user: Annotated[User, StudentRole]):
         CBTExam.arm_id == st.current_arm_id,
         CBTExam.status == EXAM_PUBLISHED,
         CBTExam.deleted_at.is_(None)).order_by(CBTExam.created_at.desc()))).scalars().all()
-    subjects, _ = await _label_maps(db, school_id)
+    subjects, _arm, _comp = await _label_maps(db, school_id)
 
     out = []
     for ex in exams:
@@ -492,6 +509,42 @@ async def save_answers(attempt_id: str, payload: SubmitIn, db: DbDep,
     return {"saved": True}
 
 
+async def _record_to_scoresheet(db, ex: CBTExam, st: Student,
+                                score: float, max_score: float,
+                                actor_id: str) -> bool:
+    """Write a CBT sitting into the result sheet, if the test is tied to a column.
+
+    The CBT percentage is scaled to the component's maximum (e.g. 80% of a
+    10-mark "Test 1" -> 8) and upserted into the student's ScoreEntry for this
+    subject + term + component. Returns True if a score was recorded.
+    """
+    if not ex.component_id:
+        return False
+    comp = await db.get(AssessmentComponent, ex.component_id)
+    if comp is None or comp.school_id != ex.school_id or comp.deleted_at is not None:
+        return False
+
+    fraction = (score / max_score) if max_score else 0.0
+    scaled = round(fraction * comp.max_score, 2)
+
+    existing = (await db.execute(select(ScoreEntry).where(
+        ScoreEntry.school_id == ex.school_id,
+        ScoreEntry.student_id == st.id,
+        ScoreEntry.subject_id == ex.subject_id,
+        ScoreEntry.term_id == ex.term_id,
+        ScoreEntry.component_id == ex.component_id))).scalars().first()
+    if existing:
+        existing.score = scaled
+        existing.arm_id = st.current_arm_id or existing.arm_id
+        existing.updated_by = actor_id
+    else:
+        db.add(ScoreEntry(
+            school_id=ex.school_id, student_id=st.id, subject_id=ex.subject_id,
+            arm_id=st.current_arm_id, term_id=ex.term_id,
+            component_id=ex.component_id, score=scaled, created_by=actor_id))
+    return True
+
+
 @router.post("/attempts/{attempt_id}/submit")
 async def submit_attempt(attempt_id: str, payload: SubmitIn, db: DbDep,
                          user: Annotated[User, StudentRole]):
@@ -516,10 +569,16 @@ async def submit_attempt(attempt_id: str, payload: SubmitIn, db: DbDep,
     a.submitted_at = _now()
     a.status = ATTEMPT_SUBMITTED
     a.auto_submitted = bool(payload.auto)
+
+    # if this test is tied to a result-sheet column, record the scaled score
+    # into the student's ScoreEntry so it flows into the report card
+    recorded = await _record_to_scoresheet(db, ex, st, score, max_score, user.id)
+
     await db.commit()
 
     result = {"attempt_id": a.id, "status": a.status,
-              "show_results": ex.show_results_immediately}
+              "show_results": ex.show_results_immediately,
+              "recorded_to_results": recorded}
     if ex.show_results_immediately:
         result.update({"score": score, "max_score": max_score,
                        "percent": round((score / max_score) * 100) if max_score else 0})

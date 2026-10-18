@@ -17,7 +17,9 @@ type Exam = {
   duration_minutes: number; max_attempts: number;
   shuffle_questions: boolean; show_results_immediately: boolean;
   total_marks: number; question_count: number; questions: Question[];
+  component_id: string | null; component_name: string | null;
 };
+type Component = { id: string; name: string; max_score: number };
 
 const TYPES = [
   { v: "single", label: "Single choice" },
@@ -211,6 +213,7 @@ export default function CBTBuilder() {
   const router = useRouter();
   const { ok, err } = useToast();
   const [exam, setExam] = useState<Exam | null>(null);
+  const [components, setComponents] = useState<Component[]>([]);
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -221,6 +224,17 @@ export default function CBTBuilder() {
   }, [id, err]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    api<Component[]>("/api/assessment-components").then(setComponents).catch(() => {});
+  }, []);
+
+  async function setComponent(componentId: string) {
+    try {
+      await api(`/api/cbt/exams/${id}`, {
+        method: "PATCH", body: JSON.stringify({ component_id: componentId || null }) });
+      load();
+    } catch (e) { err(e instanceof ApiError ? e.message : "Could not update"); }
+  }
 
   if (!exam) {
     return <div className="grid place-items-center py-20 text-ink-soft text-sm">
@@ -301,6 +315,33 @@ export default function CBTBuilder() {
           <span className="font-medium text-ink">Instructions: </span>{exam.instructions}
         </p>
       )}
+
+      {/* result-sheet mapping */}
+      <div className="rounded-lg border border-line bg-card p-4">
+        <p className="text-sm font-medium">Counts towards (result sheet)</p>
+        {isDraft ? (
+          <>
+            <select value={exam.component_id ?? ""}
+                    onChange={(e) => setComponent(e.target.value)}
+                    className="mt-2 w-full max-w-sm rounded-md border border-line bg-white px-3 py-2 text-sm">
+              <option value="">Practice only — does not count</option>
+              {components.map((c) => (
+                <option key={c.id} value={c.id}>{c.name} (max {c.max_score})</option>
+              ))}
+            </select>
+            <p className="text-xs text-ink-soft mt-1">
+              When set, each student&apos;s score is scaled to this column and recorded
+              in their report card automatically when they submit.
+            </p>
+          </>
+        ) : (
+          <p className="text-sm text-ink-soft mt-1">
+            {exam.component_name
+              ? <>Scores record into <span className="font-medium text-ledger">{exam.component_name}</span> on the result sheet.</>
+              : "Practice only — scores are not written to the result sheet."}
+          </p>
+        )}
+      </div>
 
       {/* questions */}
       <section className="space-y-3">

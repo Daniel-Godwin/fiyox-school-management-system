@@ -38,6 +38,8 @@ class ExamIn(BaseModel):
     shuffle_questions: bool = True
     show_results_immediately: bool = True
     max_attempts: int = 1
+    # result-sheet column this test counts towards; None = practice only
+    component_id: str | None = None
 
 
 class ExamPatch(BaseModel):
@@ -49,6 +51,7 @@ class ExamPatch(BaseModel):
     shuffle_questions: bool | None = None
     show_results_immediately: bool | None = None
     max_attempts: int | None = None
+    component_id: str | None = None
 
 
 class ExamOut(BaseModel):
@@ -68,9 +71,11 @@ class ExamOut(BaseModel):
     total_marks: float
     question_count: int
     status: str
+    component_id: str | None = None
     # resolved labels for display (filled by the route, not the ORM)
     subject_name: str | None = None
     class_label: str | None = None
+    component_name: str | None = None
 
 
 class ExamDetailOut(ExamOut):

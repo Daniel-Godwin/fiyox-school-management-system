@@ -51,6 +51,12 @@ class CBTExam(Base, UUIDMixin, TimestampMixin, TenantMixin):
     subject_id: Mapped[str] = mapped_column(ForeignKey("subjects.id"))
     arm_id: Mapped[str] = mapped_column(ForeignKey("class_arms.id"))
     term_id: Mapped[str] = mapped_column(ForeignKey("terms.id"))
+    # optional link to a result-sheet column (Test 1, Exam, ...). When set, each
+    # sitting's score is scaled to that component's max and written into the
+    # student's ScoreEntry on submit, so CBT results flow into the report card.
+    # Null means "practice only — does not count towards results".
+    component_id: Mapped[str | None] = mapped_column(
+        ForeignKey("assessment_components.id"))
 
     duration_minutes: Mapped[int] = mapped_column(Integer, default=30)
     # scheduling window — null means "available as soon as published"
