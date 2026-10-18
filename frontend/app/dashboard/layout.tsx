@@ -23,6 +23,8 @@ const NAV: { href: string; label: string; roles: User["role"][] }[] = [
     roles: ["super_admin", "school_admin", "principal", "teacher"] },
   { href: "/dashboard/cbt", label: "CBT tests",
     roles: ["super_admin", "school_admin", "principal", "teacher", "student"] },
+  { href: "/dashboard/analytics", label: "Analytics",
+    roles: ["super_admin", "school_admin", "principal"] },
   { href: "/dashboard/timetable", label: "Timetable",
     roles: ["super_admin", "school_admin", "principal", "teacher", "parent", "student"] },
   { href: "/dashboard/fees", label: "Fees",
