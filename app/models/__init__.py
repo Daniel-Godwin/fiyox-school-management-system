@@ -29,6 +29,10 @@ from app.models.cbt import (
     Q_SINGLE, Q_MULTIPLE, Q_BOOLEAN, Q_SHORT, QUESTION_TYPES,
     ATTEMPT_IN_PROGRESS, ATTEMPT_SUBMITTED,
 )
+from app.models.admissions import (
+    Applicant, AdmissionTest, AdmissionQuestion,
+    APPLIED, SHORTLISTED, ADMITTED, REJECTED, WITHDRAWN, APPLICANT_STATUSES,
+)
 
 __all__ = [
     "Base", "School", "User", "Role", "DEFAULT_GRADING",
@@ -49,4 +53,7 @@ __all__ = [
     "EXAM_DRAFT", "EXAM_PUBLISHED", "EXAM_CLOSED", "EXAM_STATUSES",
     "Q_SINGLE", "Q_MULTIPLE", "Q_BOOLEAN", "Q_SHORT", "QUESTION_TYPES",
     "ATTEMPT_IN_PROGRESS", "ATTEMPT_SUBMITTED",
+    "Applicant", "AdmissionTest", "AdmissionQuestion",
+    "APPLIED", "SHORTLISTED", "ADMITTED", "REJECTED", "WITHDRAWN",
+    "APPLICANT_STATUSES",
 ]
