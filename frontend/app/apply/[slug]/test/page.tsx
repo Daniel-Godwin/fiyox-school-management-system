@@ -11,7 +11,7 @@ type Start = {
   title: string; instructions: string; duration_minutes: number;
   total_marks: number; questions: Question[]; server_now: string;
 };
-type Result = { submitted: boolean; score: number; max_score: number; percent: number; message: string };
+type Result = { submitted: boolean; message: string };
 
 function fmt(s: number) { const m = Math.floor(s / 60); return `${m}:${String(s % 60).padStart(2, "0")}`; }
 
@@ -23,6 +23,7 @@ function TestInner() {
   const creds = { application_number: app, access_code: code };
 
   const [data, setData] = useState<Start | null>(null);
+  const [phase, setPhase] = useState<"intro" | "taking">("intro");
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
   const [left, setLeft] = useState<number | null>(null);
   const [result, setResult] = useState<Result | null>(null);
@@ -50,16 +51,19 @@ function TestInner() {
   useEffect(() => {
     if (!app || !code) { setFatal("Missing application number or code."); return; }
     api<Start>(`/api/admissions/${slug}/test/start`, { method: "POST", body: JSON.stringify(creds) })
-      .then((d) => {
-        setData(d);
-        offsetRef.current = Date.now() - new Date(d.server_now).getTime();
-        deadlineRef.current = new Date(d.server_now).getTime() + d.duration_minutes * 60000;
-      })
+      .then((d) => setData(d))   // show the instructions first; the clock waits for "Start"
       .catch((e) => setFatal(e instanceof ApiError ? e.message : "Could not start the test."));
   }, [slug, app, code]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // the countdown begins only when the applicant clicks "Start exam"
+  function startExam() {
+    if (!data) return;
+    deadlineRef.current = Date.now() + data.duration_minutes * 60000;
+    setPhase("taking");
+  }
+
   useEffect(() => {
-    if (!data || deadlineRef.current === null || result) return;
+    if (phase !== "taking" || !data || deadlineRef.current === null || result) return;
     const tick = () => {
       const now = Date.now() - offsetRef.current;
       const secs = Math.max(0, Math.round((deadlineRef.current! - now) / 1000));
@@ -69,7 +73,7 @@ function TestInner() {
     tick();
     const h = setInterval(tick, 1000);
     return () => clearInterval(h);
-  }, [data, result, doSubmit]);
+  }, [phase, data, result, doSubmit]);
 
   function setAnswer(q: string, v: unknown) { setAnswers((a) => ({ ...a, [q]: v })); }
 
@@ -87,14 +91,40 @@ function TestInner() {
       <div className="max-w-md w-full bg-card border border-ledger/30 rounded-xl p-6 text-center">
         <p className="text-4xl mb-2">✓</p>
         <h1 className="text-xl font-bold">Entrance test submitted</h1>
-        <p className="text-ink-soft mt-2">You scored <b className="text-ink">{result.score}/{result.max_score}</b> ({result.percent}%).</p>
-        <p className="text-ink-soft text-sm mt-1">{result.message}</p>
+        <p className="text-ink-soft text-sm mt-2">{result.message}</p>
         <Link href={`/apply/${slug}`} className="mt-4 inline-block text-sm text-ink font-medium hover:underline">← Back to admissions</Link>
       </div>
     </main>
   );
 
-  if (!data) return <main className="min-h-screen grid place-items-center bg-paper text-ink-soft text-sm"><span className="spinner" /> Preparing your test…</main>;
+  if (!data) return <main className="min-h-screen grid place-items-center bg-paper text-ink-soft text-sm"><span className="spinner" /> Loading the test…</main>;
+
+  // instructions screen — the clock does not run until the applicant starts
+  if (phase === "intro") return (
+    <main className="min-h-screen bg-paper">
+      <header className="bg-ink text-white">
+        <div className="mx-auto max-w-2xl px-5 py-4"><h1 className="font-bold">{data.title}</h1>
+          <p className="text-xs text-white/70">Entrance test</p></div>
+      </header>
+      <div className="mx-auto max-w-2xl px-5 py-8">
+        <div className="bg-card border border-line rounded-xl p-6 card space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-lg border border-line p-3"><p className="text-xs text-ink-soft">Questions</p><p className="font-bold text-lg tabular">{data.questions.length}</p></div>
+            <div className="rounded-lg border border-line p-3"><p className="text-xs text-ink-soft">Time limit</p><p className="font-bold text-lg tabular">{data.duration_minutes} min</p></div>
+          </div>
+          <div>
+            <p className="font-semibold mb-1">Instructions</p>
+            <p className="text-sm text-ink-soft whitespace-pre-line">
+              {data.instructions || "Answer all the questions. Once you start, the timer runs continuously and the test submits automatically when the time is up."}
+            </p>
+          </div>
+          <p className="text-sm text-sanction">The countdown begins when you click Start. Make sure you are ready and have a steady connection.</p>
+          <button onClick={startExam} className="rounded-md bg-ink text-white px-6 py-2.5 text-sm font-medium hover:bg-ink-soft">Start exam</button>
+        </div>
+        <p className="text-center text-xs text-ink-soft mt-6">Powered by Fiyox</p>
+      </div>
+    </main>
+  );
 
   const lowTime = left !== null && left <= 60;
   const answered = data.questions.filter((q) => { const v = answers[q.id]; return Array.isArray(v) ? v.length > 0 : v !== undefined && v !== ""; }).length;

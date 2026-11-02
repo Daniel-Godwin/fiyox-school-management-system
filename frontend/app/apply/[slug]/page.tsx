@@ -17,7 +17,6 @@ type ApplyResult = {
 type Status = {
   application_number: string; name: string; applying_class: string; status: string;
   entrance_available: boolean; entrance_taken: boolean;
-  entrance_score: number | null; entrance_max: number | null;
 };
 
 const field = "w-full rounded-md border border-line bg-white px-3 py-2 text-sm";
@@ -123,10 +122,16 @@ export default function ApplyPage() {
             </div>
             <p className="text-xs text-sanction mt-2">Write these down — you need them to check your status{result.entrance_test ? " and to sit the entrance test" : ""}.</p>
             {result.entrance_test && (
-              <Link href={`/apply/${slug}/test?app=${encodeURIComponent(result.application_number)}&code=${encodeURIComponent(result.access_code)}`}
-                    className="mt-4 inline-block rounded-md bg-ink text-white px-5 py-2.5 text-sm font-medium hover:bg-ink-soft">
-                Take the entrance test now ({result.entrance_test.question_count} questions · {result.entrance_test.duration_minutes} min)
-              </Link>
+              <div className="mt-4">
+                <p className="text-sm text-ink-soft mb-2">
+                  An entrance test ({result.entrance_test.question_count} questions · {result.entrance_test.duration_minutes} min) is part of your application.
+                  You can take it now, or come back through “Check status” when you are ready. You will read the instructions before the timer starts.
+                </p>
+                <Link href={`/apply/${slug}/test?app=${encodeURIComponent(result.application_number)}&code=${encodeURIComponent(result.access_code)}`}
+                      className="inline-block rounded-md bg-ink text-white px-5 py-2.5 text-sm font-medium hover:bg-ink-soft">
+                  Take the entrance test
+                </Link>
+              </div>
             )}
             <div className="mt-4">
               <button onClick={() => { setResult(null); setMode("status"); setSNo(result.application_number); setSCode(result.access_code); }}
@@ -194,12 +199,17 @@ export default function ApplyPage() {
                   <div className="rounded-lg border border-line p-4 mt-2">
                     <p className="font-semibold">{status.name} · {status.applying_class}</p>
                     <p className="mt-1 text-sm">Status: <span className="font-medium text-ink">{STATUS_LABEL[status.status] ?? status.status}</span></p>
-                    {status.entrance_taken && status.entrance_max
-                      ? <p className="text-sm text-ink-soft mt-1">Entrance test: {status.entrance_score}/{status.entrance_max}</p>
-                      : status.entrance_available
-                        ? <Link href={`/apply/${slug}/test?app=${encodeURIComponent(status.application_number)}&code=${encodeURIComponent(sCode.trim())}`}
-                                className="mt-2 inline-block rounded-md bg-ink text-white px-4 py-2 text-sm font-medium hover:bg-ink-soft">Take the entrance test</Link>
-                        : null}
+                    {status.entrance_available ? (
+                      <div className="mt-2">
+                        <p className="text-sm text-ink-soft mb-2">Your entrance test is ready. Take it when you are prepared.</p>
+                        <Link href={`/apply/${slug}/test?app=${encodeURIComponent(status.application_number)}&code=${encodeURIComponent(sCode.trim())}`}
+                              className="inline-block rounded-md bg-ink text-white px-4 py-2 text-sm font-medium hover:bg-ink-soft">Take the entrance test</Link>
+                      </div>
+                    ) : status.entrance_taken ? (
+                      <p className="text-sm text-ink-soft mt-1">Entrance test completed. Keep checking this page — the school will update your status once results are ready.</p>
+                    ) : (
+                      <p className="text-sm text-ink-soft mt-1">Keep checking this page for updates on your application.</p>
+                    )}
                   </div>
                 )}
               </div>

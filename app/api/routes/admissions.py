@@ -190,6 +190,9 @@ async def check_status(slug: str, creds: ApplicantCredentials, db: DbDep):
     ap = await _applicant_by_credentials(db, sch.id, creds)
     test = await _active_test_for(db, sch.id, ap.applying_class_id)
     klass = await db.get(SchoolClass, ap.applying_class_id)
+    # the entrance score is deliberately NOT returned to the applicant — only
+    # whether a test is waiting or already taken. The outcome reaches them as a
+    # change of status (shortlisted / admitted / not successful).
     return {
         "application_number": ap.application_number,
         "name": f"{ap.first_name} {ap.last_name}",
@@ -197,8 +200,6 @@ async def check_status(slug: str, creds: ApplicantCredentials, db: DbDep):
         "status": ap.status,
         "entrance_available": bool(test) and ap.entrance_taken_at is None,
         "entrance_taken": ap.entrance_taken_at is not None,
-        "entrance_score": ap.entrance_score,
-        "entrance_max": ap.entrance_max,
     }
 
 
@@ -238,16 +239,19 @@ async def submit_test(slug: str, payload: EntranceSubmitIn, db: DbDep):
         raise HTTPException(404, "No entrance test is set for your class")
     qs = await _test_questions(db, sch.id, test.id)
 
-    score, max_score, breakdown = grade(qs, payload.answers or {})
+    score, max_score, _ = grade(qs, payload.answers or {})
+    # the score is recorded for the school, but is never shown to the applicant:
+    # the outcome is the school's decision, released through the portal status.
     ap.entrance_score = score
     ap.entrance_max = max_score
     ap.entrance_answers = payload.answers or {}
     ap.entrance_taken_at = _now()
     await db.commit()
     return {
-        "submitted": True, "score": score, "max_score": max_score,
-        "percent": round((score / max_score) * 100) if max_score else 0,
-        "message": "Entrance test submitted. The school will be in touch.",
+        "submitted": True,
+        "message": ("Your entrance test has been submitted successfully. "
+                    "Please keep checking your application portal — the school "
+                    "will update your status once the results are ready."),
     }
 
 

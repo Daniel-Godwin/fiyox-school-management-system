@@ -117,13 +117,19 @@ async def test_entrance_test_flow(ctx):
 
     sub = (await client.post(f"/api/admissions/{SLUG}/test/submit", json={
         **creds, "answers": {qids["2+2?"]: "b", qids["Water is wet."]: "true"}})).json()
-    assert sub["score"] == 3 and sub["max_score"] == 3 and sub["percent"] == 100
+    # the applicant is told it was submitted, but never shown the score
+    assert sub["submitted"] is True
+    assert "score" not in sub and "percent" not in sub
+
+    # the status check also hides the score — only that the test was taken
+    st = (await client.post(f"/api/admissions/{SLUG}/status", json=creds)).json()
+    assert st["entrance_taken"] is True and "entrance_score" not in st
 
     # re-submitting is refused
     again = await client.post(f"/api/admissions/{SLUG}/test/submit", json={**creds, "answers": {}})
     assert again.status_code == 409
 
-    # the score shows to the admin
+    # the score still shows to the admin, who decides the outcome
     lst = (await client.get("/api/admissions/applicants", headers=ah)).json()["applicants"]
     joy = next(a for a in lst if a["application_number"] == res["application_number"])
     assert joy["entrance_score"] == 3 and joy["entrance_percent"] == 100
