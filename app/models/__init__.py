@@ -33,6 +33,10 @@ from app.models.admissions import (
     Applicant, AdmissionTest, AdmissionQuestion,
     APPLIED, SHORTLISTED, ADMITTED, REJECTED, WITHDRAWN, APPLICANT_STATUSES,
 )
+from app.models.finance import (
+    ExpenseCategory, Expense, IncomeEntry,
+    SalaryStructure, PayrollRun, Payslip, RUN_DRAFT, RUN_PAID,
+)
 
 __all__ = [
     "Base", "School", "User", "Role", "DEFAULT_GRADING",
@@ -56,4 +60,6 @@ __all__ = [
     "Applicant", "AdmissionTest", "AdmissionQuestion",
     "APPLIED", "SHORTLISTED", "ADMITTED", "REJECTED", "WITHDRAWN",
     "APPLICANT_STATUSES",
+    "ExpenseCategory", "Expense", "IncomeEntry",
+    "SalaryStructure", "PayrollRun", "Payslip", "RUN_DRAFT", "RUN_PAID",
 ]

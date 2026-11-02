@@ -33,6 +33,10 @@ from app.schemas.admissions import (
     ApplicationIn, ApplicantCredentials, EntranceSubmitIn,
     AdmTestIn, AdmTestPatch, AdmQuestionIn, ApplicantStatusIn, AdmitIn,
 )
+from app.schemas.finance import (
+    CategoryIn as ExpenseCategoryIn, ExpenseIn, IncomeIn, SalaryIn,
+    PayrollRunIn, PayslipAdjustIn,
+)
 
 __all__ = [
     "Token", "LoginIn", "UserOut",
@@ -52,4 +56,6 @@ __all__ = [
     "ExamDetailOut", "SubmitIn",
     "ApplicationIn", "ApplicantCredentials", "EntranceSubmitIn",
     "AdmTestIn", "AdmTestPatch", "AdmQuestionIn", "ApplicantStatusIn", "AdmitIn",
+    "ExpenseCategoryIn", "ExpenseIn", "IncomeIn", "SalaryIn",
+    "PayrollRunIn", "PayslipAdjustIn",
 ]
