@@ -221,7 +221,50 @@ export default function StudentsPage() {
           </div>
         )}
 
-        <div className="mt-6 bg-card border border-line rounded-xl overflow-hidden overflow-x-auto">
+        {/* ---- phones: one tappable card per student (no sideways scroll) ---- */}
+        <ul className="md:hidden mt-6 space-y-2">
+          {shown.map((s) => {
+            const on = selected.includes(s.id);
+            return (
+              <li
+                key={s.id}
+                className={`flex items-center gap-3 rounded-xl border bg-card p-3 ${
+                  on ? "border-brass bg-brass/5" : "border-line"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={on}
+                  onChange={() => toggleSelect(s.id)}
+                  aria-label={`Select ${s.first_name} ${s.last_name}`}
+                  className="h-5 w-5 shrink-0"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium truncate">{s.first_name} {s.last_name}</p>
+                  <p className="text-xs text-ink-soft mt-0.5">
+                    <span className="tabular">{s.admission_number}</span>
+                    <span className="capitalize"> · {s.gender}</span>
+                  </p>
+                </div>
+                <span
+                  className={`shrink-0 inline-block rounded-full px-2 py-0.5 text-xs ${
+                    s.is_active ? "bg-ledger/10 text-ledger" : "bg-sanction/10 text-sanction"
+                  }`}
+                >
+                  {s.is_active ? "Active" : "Inactive"}
+                </span>
+              </li>
+            );
+          })}
+          {shown.length === 0 && (
+            <li className="rounded-xl border border-dashed border-line bg-card px-4 py-8 text-center text-ink-soft text-sm">
+              {q ? "No student matches that search." : "No students yet. Import a class list to begin."}
+            </li>
+          )}
+        </ul>
+
+        {/* ---- tablet / desktop: the full register table ---- */}
+        <div className="hidden md:block mt-6 bg-card border border-line rounded-xl overflow-hidden overflow-x-auto">
           <table className="w-full min-w-[560px] text-sm">
             <thead>
               <tr className="bg-ink text-white text-left">

@@ -228,7 +228,8 @@ export default function ScoreEntryPage() {
 
       {ready && !loading && students.length > 0 && (
         <>
-          <div className="overflow-x-auto rounded-lg border border-line bg-card">
+          {/* tablet / desktop: the full sheet as a table */}
+          <div className="hidden md:block overflow-x-auto rounded-lg border border-line bg-card">
             <table className="min-w-full text-sm">
               <thead>
                 <tr className="bg-ink text-white text-left">
@@ -270,6 +271,45 @@ export default function ScoreEntryPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+
+          {/* phone: one card per student so the name and its score boxes stay together */}
+          <div className="md:hidden space-y-3">
+            {students.map((s) => (
+              <div key={s.id} className="rounded-lg border border-line bg-card p-3">
+                <div className="flex items-baseline justify-between gap-2 mb-3">
+                  <p className="font-medium leading-tight">
+                    {s.first_name} {s.last_name}
+                    <span className="block tabular text-xs text-ink-soft">{s.admission_number}</span>
+                  </p>
+                  <p className="text-sm text-ink-soft shrink-0">
+                    Total <span className="tabular font-semibold text-ink">{totalFor(s.id)}</span>
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {components.map((c) => {
+                    const raw = cells[k(s.id, c.id)] ?? "";
+                    const bad = isInvalid(c.id, raw);
+                    return (
+                      <label key={c.id} className="block">
+                        <span className="block text-xs text-ink-soft mb-1">
+                          {c.name} <span className="opacity-60">/{c.max_score}</span>
+                        </span>
+                        <input
+                          inputMode="decimal"
+                          aria-label={`${s.first_name} ${s.last_name} — ${c.name}`}
+                          value={raw}
+                          onChange={(e) => setCell(s.id, c.id, e.target.value)}
+                          className={`w-full rounded border px-3 py-2 text-center tabular ${
+                            bad ? "border-sanction bg-sanction/10" : "border-line bg-white"
+                          }`}
+                        />
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
 
           <div className="flex items-center gap-4">

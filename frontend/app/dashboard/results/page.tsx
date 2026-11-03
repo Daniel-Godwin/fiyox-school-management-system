@@ -430,8 +430,8 @@ export default function ResultsPage() {
                   <tr className="bg-ink text-white text-left">
                     <th className="px-3 py-2 font-medium">Pos.</th>
                     <th className="px-3 py-2 font-medium">Student</th>
-                    <th className="px-3 py-2 font-medium text-right">Subjects</th>
-                    <th className="px-3 py-2 font-medium text-right">Total</th>
+                    <th className="px-3 py-2 font-medium text-right hidden sm:table-cell">Subjects</th>
+                    <th className="px-3 py-2 font-medium text-right hidden sm:table-cell">Total</th>
                     <th className="px-3 py-2 font-medium text-right">Average</th>
                     <th className="px-3 py-2 font-medium">Status</th>
                     <th className="px-3 py-2 font-medium text-right">Comments</th>
@@ -444,12 +444,12 @@ export default function ResultsPage() {
                     {!r.computed ? (
                     <tr className={i % 2 ? "bg-paper" : "bg-card"}>
                       <td className="px-3 py-2 text-ink-soft">—</td>
-                      <td className="px-3 py-2 whitespace-nowrap">
-                        <span className="tabular text-ink-soft mr-2">{r.admission_number}</span>
+                      <td className="px-3 py-2 sm:whitespace-nowrap">
+                        <span className="tabular text-ink-soft block text-xs sm:inline sm:text-sm sm:mr-2">{r.admission_number}</span>
                         {r.name}
                       </td>
-                      <td className="px-3 py-2 text-right text-ink-soft">—</td>
-                      <td className="px-3 py-2 text-right text-ink-soft">—</td>
+                      <td className="px-3 py-2 text-right text-ink-soft hidden sm:table-cell">—</td>
+                      <td className="px-3 py-2 text-right text-ink-soft hidden sm:table-cell">—</td>
                       <td className="px-3 py-2 text-right text-ink-soft">—</td>
                       <td className="px-3 py-2">
                         <span className="inline-block rounded-full bg-brass/15 text-brass-ink px-2 py-0.5 text-xs font-medium">
@@ -466,12 +466,12 @@ export default function ResultsPage() {
                         {ordinal(r.position)}
                         <span className="text-ink-soft font-normal"> / {r.class_size}</span>
                       </td>
-                      <td className="px-3 py-2 whitespace-nowrap">
-                        <span className="tabular text-ink-soft mr-2">{r.admission_number}</span>
+                      <td className="px-3 py-2 sm:whitespace-nowrap">
+                        <span className="tabular text-ink-soft block text-xs sm:inline sm:text-sm sm:mr-2">{r.admission_number}</span>
                         {r.name}
                       </td>
-                      <td className="px-3 py-2 text-right tabular">{r.subjects_count}</td>
-                      <td className="px-3 py-2 text-right tabular">{r.grand_total}</td>
+                      <td className="px-3 py-2 text-right tabular hidden sm:table-cell">{r.subjects_count}</td>
+                      <td className="px-3 py-2 text-right tabular hidden sm:table-cell">{r.grand_total}</td>
                       <td className="px-3 py-2 text-right tabular">{r.average}%</td>
                       <td className="px-3 py-2">
                         {r.is_published ? (

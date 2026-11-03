@@ -285,6 +285,52 @@ export default function UsersPage() {
     } finally { setBusy(null); }
   }
 
+  // The per-user action buttons, shared by the phone card list and the desktop
+  // table so the two never drift apart.
+  const rowActions = (u: UserRow) => (
+    <>
+      <button onClick={() => openEdit(u)} disabled={busy !== null}
+              className="text-ink underline underline-offset-2 hover:text-ink-soft disabled:opacity-50">
+        Edit
+      </button>
+      {u.role === "parent" && (
+        <button onClick={() => openWards(u)} disabled={busy !== null}
+                className="text-ink underline underline-offset-2 hover:text-ink-soft disabled:opacity-50">
+          Children
+        </button>
+      )}
+      <button onClick={() => resetPassword(u)} disabled={busy !== null}
+              className="text-ink underline underline-offset-2 hover:text-ink-soft disabled:opacity-50">
+        {busy === `r-${u.id}` ? "Resetting…" : "Reset password"}
+      </button>
+      <button onClick={() => setStatus(u)} disabled={busy !== null}
+              className="text-ink underline underline-offset-2 hover:text-ink-soft disabled:opacity-50">
+        {busy === u.id ? "Saving…" : u.is_active ? "Deactivate" : "Reactivate"}
+      </button>
+      <button onClick={() => offboard(u)} disabled={busy !== null}
+              className="text-sanction underline underline-offset-2 hover:opacity-70 disabled:opacity-50">
+        {busy === `o-${u.id}` ? "Offboarding…" : "Offboard"}
+      </button>
+    </>
+  );
+
+  const phoneBadge = (u: UserRow) =>
+    u.role === "parent" && u.phone ? (
+      <span
+        title={u.phone_verified ? "Phone number verified — SMS reaches this parent" : "Phone number not yet verified"}
+        className={`ml-2 inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+          u.phone_verified ? "bg-ledger/10 text-ledger" : "bg-paper text-ink-soft border border-line"}`}>
+        {u.phone_verified ? "✓ phone" : "unverified"}
+      </span>
+    ) : null;
+
+  const statusBadge = (u: UserRow) => (
+    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
+      u.is_active ? "bg-ledger/10 text-ledger" : "bg-sanction/10 text-sanction"}`}>
+      {u.is_active ? "Active" : "Deactivated"}
+    </span>
+  );
+
   return (
     <div className="space-y-5">
       <header>
@@ -601,7 +647,27 @@ export default function UsersPage() {
         ))}
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-line bg-card">
+      {/* ---- phones: one card per account ---- */}
+      <ul className="md:hidden space-y-2">
+        {users.map((u) => (
+          <li key={u.id} className="rounded-xl border border-line bg-card p-3">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="font-medium">{u.first_name} {u.last_name}{phoneBadge(u)}</p>
+                <p className="text-xs text-ink-soft break-all mt-0.5">{u.email}</p>
+                <p className="text-xs text-ink-soft mt-0.5">{ROLE_LABEL[u.role] ?? u.role}</p>
+              </div>
+              <span className="shrink-0">{statusBadge(u)}</span>
+            </div>
+            <div className="mt-2 pt-2 border-t border-line flex flex-wrap gap-x-4 gap-y-2 text-sm">
+              {rowActions(u)}
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      {/* ---- tablet / desktop: the full table ---- */}
+      <div className="hidden md:block overflow-x-auto rounded-lg border border-line bg-card">
         <table className="min-w-full text-sm">
           <thead>
             <tr className="bg-ink text-white text-left">
@@ -616,52 +682,14 @@ export default function UsersPage() {
             {users.map((u, i) => (
               <tr key={u.id} className={i % 2 ? "bg-paper" : "bg-card"}>
                 <td className="px-3 py-2 whitespace-nowrap">
-                  {u.first_name} {u.last_name}
-                  {u.role === "parent" && u.phone && (
-                    <span
-                      title={u.phone_verified
-                        ? "Phone number verified — SMS reaches this parent"
-                        : "Phone number not yet verified"}
-                      className={`ml-2 inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
-                        u.phone_verified
-                          ? "bg-ledger/10 text-ledger"
-                          : "bg-paper text-ink-soft border border-line"}`}>
-                      {u.phone_verified ? "✓ phone" : "unverified"}
-                    </span>
-                  )}
+                  {u.first_name} {u.last_name}{phoneBadge(u)}
                 </td>
                 <td className="px-3 py-2">{u.email}</td>
                 <td className="px-3 py-2">{ROLE_LABEL[u.role] ?? u.role}</td>
-                <td className="px-3 py-2">
-                  <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
-                    u.is_active ? "bg-ledger/10 text-ledger" : "bg-sanction/10 text-sanction"}`}>
-                    {u.is_active ? "Active" : "Deactivated"}
-                  </span>
-                </td>
+                <td className="px-3 py-2">{statusBadge(u)}</td>
                 <td className="px-3 py-2 text-right">
                   <div className="flex flex-wrap justify-end gap-x-3 gap-y-1">
-                    <button onClick={() => openEdit(u)} disabled={busy !== null}
-                            className="text-ink underline underline-offset-2 hover:text-ink-soft disabled:opacity-50">
-                      Edit
-                    </button>
-                    {u.role === "parent" && (
-                      <button onClick={() => openWards(u)} disabled={busy !== null}
-                              className="text-ink underline underline-offset-2 hover:text-ink-soft disabled:opacity-50">
-                        Children
-                      </button>
-                    )}
-                    <button onClick={() => resetPassword(u)} disabled={busy !== null}
-                            className="text-ink underline underline-offset-2 hover:text-ink-soft disabled:opacity-50">
-                      {busy === `r-${u.id}` ? "Resetting…" : "Reset password"}
-                    </button>
-                    <button onClick={() => setStatus(u)} disabled={busy !== null}
-                            className="text-ink underline underline-offset-2 hover:text-ink-soft disabled:opacity-50">
-                      {busy === u.id ? "Saving…" : u.is_active ? "Deactivate" : "Reactivate"}
-                    </button>
-                    <button onClick={() => offboard(u)} disabled={busy !== null}
-                            className="text-sanction underline underline-offset-2 hover:opacity-70 disabled:opacity-50">
-                      {busy === `o-${u.id}` ? "Offboarding…" : "Offboard"}
-                    </button>
+                    {rowActions(u)}
                   </div>
                 </td>
               </tr>

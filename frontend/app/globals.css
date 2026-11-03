@@ -80,6 +80,28 @@ h1, h2, h3, .display {
   -webkit-overflow-scrolling: touch;
 }
 
+/* ---- data tables on phones ----
+   Most registers are wrapped in a horizontally-scrolling card. On a narrow
+   screen, (1) tighten the cell gutters so more columns fit before a swipe is
+   needed, and (2) paint a soft shadow on whichever edge still has hidden
+   content, so the swipe is discoverable instead of a guess. The shadow uses
+   the classic background-attachment:local trick and sits only on the scroll
+   container, so it never fights the table's own row colours. */
+@media (max-width: 767px) {
+  table th, table td {
+    padding-left: 0.6rem !important;
+    padding-right: 0.6rem !important;
+  }
+  .overflow-x-auto {
+    background:
+      linear-gradient(to right, var(--color-card), rgba(255,255,255,0)) 0 0 / 20px 100% no-repeat,
+      linear-gradient(to left,  var(--color-card), rgba(255,255,255,0)) 100% 0 / 20px 100% no-repeat,
+      radial-gradient(farthest-side at 0 50%,   rgba(11,31,58,0.16), rgba(11,31,58,0)) 0 0 / 11px 100% no-repeat,
+      radial-gradient(farthest-side at 100% 50%, rgba(11,31,58,0.16), rgba(11,31,58,0)) 100% 0 / 11px 100% no-repeat;
+    background-attachment: local, local, scroll, scroll;
+  }
+}
+
 /* ---- interaction polish: applied app-wide ---- */
 
 /* every interactive control eases rather than snaps */
