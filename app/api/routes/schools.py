@@ -83,9 +83,10 @@ async def create_school_account(
 
 # ---------- School settings (school admin manages their own school) ----------
 from fastapi import Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from app.core.deps import tenant_scope
 from app.services.audit import record_audit
+from app.services.admissions import admission_preview
 
 
 class SchoolSettingsIn(BaseModel):
@@ -99,6 +100,17 @@ class SchoolSettingsIn(BaseModel):
     result_approval_required: bool | None = None
     affective_traits: list[str] | None = None
     online_payments_enabled: bool | None = None
+    admission_prefix: str | None = Field(None, max_length=12)
+    admission_pad: int | None = Field(None, ge=2, le=6)
+
+    @field_validator("admission_prefix")
+    @classmethod
+    def _clean_prefix(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        # letters/digits only, upper-cased; blank clears it (falls back to initials)
+        v = "".join(c for c in v if c.isalnum()).upper()
+        return v or None
 
 
 @router.get("/me", tags=["schools"])
@@ -120,6 +132,9 @@ async def my_school(
         "result_approval_required": school.result_approval_required,
         "affective_traits": school.affective_traits or [],
         "online_payments_enabled": school.online_payments_enabled,
+        "admission_prefix": school.admission_prefix,
+        "admission_pad": school.admission_pad,
+        "admission_number_preview": admission_preview(school),
         "has_logo": bool(school.logo_url),
         "has_signature": bool(school.signature_url),
         "has_stamp": bool(school.stamp_url),

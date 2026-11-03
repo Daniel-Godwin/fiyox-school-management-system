@@ -1,4 +1,6 @@
 """Online admissions — public application, entrance test, review and admit."""
+from datetime import datetime, timezone
+
 from tests.conftest import headers
 
 SLUG = "gss-ikeja"
@@ -238,6 +240,68 @@ async def test_principal_only_approves_and_clear_returns(ctx):
                               json={"pass_mark": 50})).status_code == 403
     assert (await client.post("/api/admissions/proposals/approve", headers=th,
                               json={})).status_code == 403
+
+
+async def test_admission_number_auto_generated_from_pattern(ctx):
+    client, ids = ctx
+    ah = await _admin(client)
+    ph = await _principal(client, ids)
+    cid = await _class_id(client)
+
+    # the school sets its admission-number format
+    s = await client.patch("/api/schools/me", headers=ah,
+                           json={"admission_prefix": "fad", "admission_pad": 3})
+    assert s.status_code == 200
+    yy = datetime.now(timezone.utc).strftime("%y")
+    me = (await client.get("/api/schools/me", headers=ah)).json()
+    assert me["admission_prefix"] == "FAD"        # normalised to upper-case
+    assert me["admission_number_preview"] == f"FAD/{yy}/001"
+
+    async def approved_applicant(first):
+        res = await _apply(client, cid, first=first, last="Test")
+        ap = next(a for a in (await client.get("/api/admissions/applicants", headers=ah)).json()["applicants"]
+                  if a["application_number"] == res["application_number"])
+        await client.post("/api/admissions/reconcile/manual", headers=ah,
+                          json={"applicant_ids": [ap["id"]], "proposed_status": "admitted"})
+        await client.post("/api/admissions/proposals/approve", headers=ph,
+                          json={"applicant_ids": [ap["id"]]})
+        return ap["id"]
+
+    # enrol with no number -> generated, and the serial advances
+    id1 = await approved_applicant("Ada")
+    e1 = await client.post(f"/api/admissions/applicants/{id1}/admit", headers=ah, json={})
+    assert e1.status_code == 200 and e1.json()["admission_number"] == f"FAD/{yy}/001"
+
+    id2 = await approved_applicant("Bode")
+    e2 = await client.post(f"/api/admissions/applicants/{id2}/admit", headers=ah, json={})
+    assert e2.json()["admission_number"] == f"FAD/{yy}/002"
+
+    # a custom number still overrides the automatic one
+    id3 = await approved_applicant("Chidi")
+    e3 = await client.post(f"/api/admissions/applicants/{id3}/admit", headers=ah,
+                           json={"admission_number": "FAD/OLD/077"})
+    assert e3.json()["admission_number"] == "FAD/OLD/077"
+
+
+async def test_admission_number_defaults_to_initials(ctx):
+    client, ids = ctx
+    ah = await _admin(client)
+    ph = await _principal(client, ids)
+    cid = await _class_id(client)
+    yy = datetime.now(timezone.utc).strftime("%y")
+    # no prefix set -> falls back to the school-name initials ("GSS Ikeja" -> "GI")
+    me = (await client.get("/api/schools/me", headers=ah)).json()
+    assert me["admission_number_preview"] == f"GI/{yy}/001"
+
+    res = await _apply(client, cid, first="Zara", last="Test")
+    ap = next(a for a in (await client.get("/api/admissions/applicants", headers=ah)).json()["applicants"]
+              if a["application_number"] == res["application_number"])
+    await client.post("/api/admissions/reconcile/manual", headers=ah,
+                      json={"applicant_ids": [ap["id"]], "proposed_status": "admitted"})
+    await client.post("/api/admissions/proposals/approve", headers=ph,
+                      json={"applicant_ids": [ap["id"]]})
+    e = await client.post(f"/api/admissions/applicants/{ap['id']}/admit", headers=ah, json={})
+    assert e.json()["admission_number"] == f"GI/{yy}/001"
 
 
 async def test_review_is_staff_only(ctx):

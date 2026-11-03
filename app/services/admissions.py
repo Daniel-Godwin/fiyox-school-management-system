@@ -9,8 +9,44 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.admissions import Applicant, ADMITTED
 from app.models.student import Student
+from app.models.school import School
 
 _CODE_ALPHABET = string.ascii_uppercase + string.digits  # no lowercase: easy to read/type
+
+
+def _initials(name: str) -> str:
+    """A fallback prefix from a school's name, e.g. 'Fiyox Academy Demo' -> 'FAD'."""
+    words = [w for w in "".join(c if c.isalnum() else " " for c in name).split() if w]
+    letters = "".join(w[0] for w in words if w[0].isalpha())[:4].upper()
+    return letters or "ADM"
+
+
+def admission_prefix(school: School) -> str:
+    return (school.admission_prefix or "").strip().upper() or _initials(school.name)
+
+
+def admission_preview(school: School) -> str:
+    """What the next admission number would look like (serial shown as 1)."""
+    yy = datetime.now(timezone.utc).strftime("%y")
+    pad = school.admission_pad or 3
+    return f"{admission_prefix(school)}/{yy}/{1:0{pad}d}"
+
+
+async def next_admission_number(db: AsyncSession, school: School) -> str:
+    """<prefix>/<2-digit year>/<serial>, serial continuing from the highest used
+    for this school and year so it never collides with an existing number."""
+    yy = datetime.now(timezone.utc).strftime("%y")
+    pad = school.admission_pad or 3
+    prefix = f"{admission_prefix(school)}/{yy}/"
+    rows = (await db.execute(select(Student.admission_number).where(
+        Student.school_id == school.id,
+        Student.admission_number.like(f"{prefix}%")))).scalars().all()
+    highest = 0
+    for num in rows:
+        tail = num.rsplit("/", 1)[-1]
+        if tail.isdigit():
+            highest = max(highest, int(tail))
+    return f"{prefix}{highest + 1:0{pad}d}"
 
 
 def new_access_code(n: int = 6) -> str:

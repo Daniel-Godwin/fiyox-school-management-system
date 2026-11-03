@@ -36,6 +36,7 @@ from app.schemas import (
 from app.services.cbt import grade, student_view
 from app.services.admissions import (
     new_access_code, next_application_number, admit_applicant,
+    next_admission_number,
 )
 from app.services.audit import record_audit
 
@@ -534,12 +535,14 @@ async def admit(applicant_id: str, payload: AdmitIn, request: Request,
     # applicant can be turned into a student.
     if ap.status != ADMITTED:
         raise HTTPException(409, "Admission must be approved by the principal before enrolment")
-    if not payload.admission_number.strip():
-        raise HTTPException(422, "An admission number is required")
+    school = await db.get(School, school_id)
+    # the number is generated from the school's pattern unless one is given
+    manual = (payload.admission_number or "").strip()
+    admission_number = manual or await next_admission_number(db, school)
     # admission numbers are unique within a school
     clash = (await db.execute(select(Student).where(
         Student.school_id == school_id,
-        Student.admission_number == payload.admission_number.strip(),
+        Student.admission_number == admission_number,
         Student.deleted_at.is_(None)))).scalars().first()
     if clash is not None:
         raise HTTPException(409, "That admission number is already in use")
@@ -549,7 +552,7 @@ async def admit(applicant_id: str, payload: AdmitIn, request: Request,
             raise HTTPException(422, "Unknown class/arm")
 
     student = await admit_applicant(
-        db, ap, admission_number=payload.admission_number.strip(),
+        db, ap, admission_number=admission_number,
         arm_id=payload.arm_id, actor_id=user.id)
     await record_audit(db, school_id=school_id, user_id=user.id, action="create",
                        table_name="students", record_id=student.id,

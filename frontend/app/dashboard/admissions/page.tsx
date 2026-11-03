@@ -54,6 +54,8 @@ export default function AdmissionsPage() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [applyPath, setApplyPath] = useState<string>("");
   const [admNo, setAdmNo] = useState(""); const [admArm, setAdmArm] = useState("");
+  const [manualNo, setManualNo] = useState(false);   // override the auto number
+  const [numberPreview, setNumberPreview] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [sel, setSel] = useState<Set<string>>(new Set());
 
@@ -75,6 +77,8 @@ export default function AdmissionsPage() {
     api<Me>("/api/auth/me").then((m) => setRole(m.role)).catch(() => {});
     api<Arm[]>("/api/academics/arms").then(setArms).catch(() => {});
     api<{ apply_path: string }>("/api/admissions/link").then((r) => setApplyPath(r.apply_path)).catch(() => {});
+    api<{ admission_number_preview: string }>("/api/schools/me")
+      .then((s) => setNumberPreview(s.admission_number_preview)).catch(() => {});
   }, []);
 
   const origin = typeof window !== "undefined" ? window.location.origin : "";
@@ -133,12 +137,13 @@ export default function AdmissionsPage() {
   }
 
   async function admit(a: Applicant) {
-    if (!admNo.trim()) return err("Enter an admission number");
+    if (manualNo && !admNo.trim()) return err("Enter an admission number, or switch to automatic");
     setBusy(true);
     try {
-      await api(`/api/admissions/applicants/${a.id}/admit`, { method: "POST",
-        body: JSON.stringify({ admission_number: admNo.trim(), arm_id: admArm || null }) });
-      ok(`${a.name} enrolled as a student.`); setOpenId(null); setAdmNo(""); setAdmArm(""); load();
+      const r = await api<{ admission_number: string }>(`/api/admissions/applicants/${a.id}/admit`, { method: "POST",
+        body: JSON.stringify({ admission_number: manualNo ? admNo.trim() : null, arm_id: admArm || null }) });
+      ok(`${a.name} enrolled as ${r.admission_number}.`);
+      setOpenId(null); setAdmNo(""); setAdmArm(""); setManualNo(false); load();
     } catch (e) { err(e instanceof ApiError ? e.message : "Could not enrol"); }
     setBusy(false);
   }
@@ -322,19 +327,33 @@ export default function AdmissionsPage() {
                     a.admitted_student_id ? (
                       <p className="text-ledger font-medium">✓ Enrolled as a student.</p>
                     ) : canEnrol ? (
-                      <div className="rounded-lg border border-ledger/30 bg-ledger/5 p-3">
-                        <p className="text-sm font-medium mb-2">Enrol this admitted applicant</p>
+                      <div className="rounded-lg border border-ledger/30 bg-ledger/5 p-3 space-y-3">
+                        <p className="text-sm font-medium">Enrol this admitted applicant</p>
                         <div className="flex flex-wrap items-end gap-2">
-                          <div><label className="block text-xs text-ink-soft mb-1">Admission number</label>
-                            <input className="rounded-md border border-line bg-white px-3 py-2 text-sm" value={admNo} onChange={e=>setAdmNo(e.target.value)} placeholder="GSS/26/001" /></div>
-                          <div><label className="block text-xs text-ink-soft mb-1">Class / arm</label>
+                          <div>
+                            <label className="block text-xs text-ink-soft mb-1">Class / arm</label>
                             <select className="rounded-md border border-line bg-white px-3 py-2 text-sm" value={admArm} onChange={e=>setAdmArm(e.target.value)}>
                               <option value="">Unassigned</option>
-                              {arms.map(x=><option key={x.id} value={x.id}>{x.label}</option>)}</select></div>
+                              {arms.map(x=><option key={x.id} value={x.id}>{x.label}</option>)}</select>
+                          </div>
                           <button onClick={() => admit(a)} disabled={busy}
                                   className="rounded-md bg-ledger text-white px-4 py-2 text-sm font-medium hover:opacity-90 disabled:opacity-50">
                             {busy ? "Enrolling…" : "Enrol → create student"}</button>
                         </div>
+                        {manualNo ? (
+                          <div className="flex flex-wrap items-end gap-2">
+                            <div>
+                              <label className="block text-xs text-ink-soft mb-1">Custom admission number</label>
+                              <input className="rounded-md border border-line bg-white px-3 py-2 text-sm" value={admNo} onChange={e=>setAdmNo(e.target.value)} placeholder={numberPreview || "e.g. FAD/26/001"} />
+                            </div>
+                            <button onClick={() => { setManualNo(false); setAdmNo(""); }} className="text-sm text-ink-soft underline underline-offset-2 pb-2">Use automatic instead</button>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-ink-soft">
+                            Admission number assigned automatically{numberPreview ? <> — next is <span className="tabular font-medium text-ink">{numberPreview}</span></> : null}.{" "}
+                            <button onClick={() => setManualNo(true)} className="text-ink underline underline-offset-2">Set a custom number</button>
+                          </p>
+                        )}
                       </div>
                     ) : (
                       <p className="text-ink-soft">Admitted — the school admin will enrol this applicant.</p>

@@ -19,6 +19,9 @@ type SchoolSettings = {
   result_approval_required: boolean;
   online_payments_enabled: boolean;
   affective_traits: string[];
+  admission_prefix: string | null;
+  admission_pad: number;
+  admission_number_preview: string;
   has_logo: boolean; has_signature: boolean; has_stamp: boolean;
   logo_url: string | null;
 };
@@ -34,6 +37,8 @@ export default function SetupPage() {
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [components, setComponents] = useState<Component[]>([]);
   const [school, setSchool] = useState<SchoolSettings | null>(null);
+  const [admPrefix, setAdmPrefix] = useState("");
+  const [admPad, setAdmPad] = useState(3);
   const [newTrait, setNewTrait] = useState("");
   const [bank, setBank] = useState<CommentBankEntry[]>([]);
   const [newComment, setNewComment] = useState<{ text: string; min: string; max: string; audience: "form_teacher" | "principal" }>(
@@ -164,6 +169,22 @@ export default function SetupPage() {
       setNotice({ kind: "ok", text: "Principal's name saved." });
       await load();
     } catch { setNotice({ kind: "err", text: "Could not save the name." }); }
+    finally { setBusy(null); }
+  }
+
+  useEffect(() => {
+    if (school) { setAdmPrefix(school.admission_prefix ?? ""); setAdmPad(school.admission_pad ?? 3); }
+  }, [school?.admission_prefix, school?.admission_pad]);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function saveAdmissionPattern(prefix: string, pad: number) {
+    setBusy("admission"); setNotice(null);
+    try {
+      await api("/api/schools/me", {
+        method: "PATCH", body: JSON.stringify({ admission_prefix: prefix, admission_pad: pad }),
+      });
+      setNotice({ kind: "ok", text: "Admission number format saved." });
+      await load();
+    } catch { setNotice({ kind: "err", text: "Could not save the format." }); }
     finally { setBusy(null); }
   }
 
@@ -595,6 +616,46 @@ export default function SetupPage() {
             </label>
             <span className="text-xs text-ink-soft pb-2">Saves when you click away.</span>
           </div>
+        </section>
+      )}
+
+      {/* admission numbers */}
+      {school && (
+        <section className="rounded-lg border border-line bg-card p-4">
+          <p className="text-sm font-medium">Admission numbers</p>
+          <p className="text-xs text-ink-soft mt-1 mb-3">
+            New students are given an admission number automatically when you enrol them. Set your
+            school&apos;s format here — a prefix and the number of digits.
+          </p>
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="block">
+              <span className="block text-xs text-ink-soft mb-1">Prefix</span>
+              <input value={admPrefix} onChange={(e) => setAdmPrefix(e.target.value.toUpperCase())}
+                     placeholder="e.g. FAD" maxLength={12}
+                     className="w-28 rounded border border-line px-2 py-1.5 text-sm" />
+            </label>
+            <label className="block">
+              <span className="block text-xs text-ink-soft mb-1">Digits</span>
+              <select value={admPad} onChange={(e) => setAdmPad(Number(e.target.value))}
+                      className="rounded border border-line px-2 py-1.5 text-sm">
+                {[2, 3, 4, 5].map((n) => <option key={n} value={n}>{n} ({String(1).padStart(n, "0")})</option>)}
+              </select>
+            </label>
+            <div className="pb-1">
+              <span className="block text-xs text-ink-soft mb-1">Next will look like</span>
+              <span className="tabular font-semibold">
+                {`${(admPrefix.trim() || school.admission_number_preview.split("/")[0])}/${new Date().getFullYear() % 100}/${String(1).padStart(admPad, "0")}`}
+              </span>
+            </div>
+            <button onClick={() => saveAdmissionPattern(admPrefix.trim(), admPad)}
+                    disabled={busy === "admission"}
+                    className="rounded-md bg-ink text-white px-4 py-2 text-sm font-medium hover:bg-ink-soft disabled:opacity-50">
+              {busy === "admission" ? "Saving…" : "Save format"}
+            </button>
+          </div>
+          <p className="text-xs text-ink-soft mt-2">
+            Leave the prefix blank to use your school&apos;s initials. The year updates automatically each session.
+          </p>
         </section>
       )}
 

@@ -1,6 +1,6 @@
 """The tenant (School) and platform/tenant Users with RBAC roles."""
 import enum
-from sqlalchemy import Boolean, JSON, String, UniqueConstraint, Text
+from sqlalchemy import Boolean, Integer, JSON, String, UniqueConstraint, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import Base, UUIDMixin, TimestampMixin
 
@@ -52,6 +52,11 @@ class School(Base, UUIDMixin, TimestampMixin):
     stamp_url: Mapped[str | None] = mapped_column(Text)
     principal_name: Mapped[str | None] = mapped_column(String(120))
     primary_color: Mapped[str] = mapped_column(String(9), default="#0B1F3A")
+    # admission numbers are generated per school as <prefix>/<2-digit year>/<serial>.
+    # prefix null falls back to the school name's initials; pad is the serial width
+    # (3 -> 001, 4 -> 0001).
+    admission_prefix: Mapped[str | None] = mapped_column(String(12))
+    admission_pad: Mapped[int] = mapped_column(Integer, default=3)
     # per-school configurable grading & policies
     grading_config: Mapped[dict] = mapped_column(JSON, default=DEFAULT_GRADING)
     withhold_results_on_debt: Mapped[bool] = mapped_column(Boolean, default=False)

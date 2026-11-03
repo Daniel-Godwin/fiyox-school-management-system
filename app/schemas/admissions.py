@@ -65,7 +65,8 @@ class ApplicantStatusIn(BaseModel):
 
 
 class AdmitIn(BaseModel):
-    admission_number: str
+    # blank/omitted -> the school's next number is generated automatically
+    admission_number: str | None = None
     arm_id: str | None = None
 
 
