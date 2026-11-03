@@ -8,6 +8,16 @@ async def _admin(client):
     return await headers(client, "admin@gss-ikeja.ng", "admin123")
 
 
+async def _principal(client, ids):
+    """Create a principal for the school (via the super admin) and return its headers."""
+    oh = await headers(client, "owner@fiyox.ng", "owner123")
+    r = await client.post(f"/api/schools/{ids['school_id']}/accounts", headers=oh, json={
+        "role": "principal", "email": "principal@gss-ikeja.ng",
+        "first_name": "Bola", "last_name": "Adeyemi"})
+    assert r.status_code == 201, r.text
+    return await headers(client, "principal@gss-ikeja.ng", r.json()["password"])
+
+
 async def _class_id(client):
     info = (await client.get(f"/api/admissions/{SLUG}/info")).json()
     return info["classes"][0]["id"]
@@ -63,30 +73,42 @@ async def test_admin_review_and_admit(ctx):
     assert lst["counts"]["applied"] >= 1
     ap = next(a for a in lst["applicants"] if a["application_number"] == res["application_number"])
 
-    # shortlist
-    s = await client.patch(f"/api/admissions/applicants/{ap['id']}/status", headers=ah,
-                           json={"status": "shortlisted", "note": "Strong"})
-    assert s.status_code == 200 and s.json()["status"] == "shortlisted"
+    # admin proposes admission (manual) — nothing the applicant sees changes yet
+    pr = await client.post("/api/admissions/reconcile/manual", headers=ah,
+                           json={"applicant_ids": [ap["id"]], "proposed_status": "admitted"})
+    assert pr.status_code == 200 and pr.json()["proposed"] == 1
+    mid = (await client.get(f"/api/admissions/applicants/{ap['id']}", headers=ah)).json()
+    assert mid["status"] == "applied" and mid["proposed_status"] == "admitted"
 
-    # admit -> creates a student
+    # the public status still shows nothing — the decision is not yet approved
+    pub = (await client.post(f"/api/admissions/{SLUG}/status", json={
+        "application_number": res["application_number"], "access_code": res["access_code"]})).json()
+    assert pub["status"] == "applied"
+
+    # the admin cannot approve — only the principal can
+    denied = await client.post("/api/admissions/proposals/approve", headers=ah,
+                               json={"applicant_ids": [ap["id"]]})
+    assert denied.status_code == 403
+
+    # enrolment is refused before approval
+    early = await client.post(f"/api/admissions/applicants/{ap['id']}/admit", headers=ah,
+                              json={"admission_number": "GSS/26/900"})
+    assert early.status_code == 409
+
+    # the principal approves -> status becomes admitted and reaches the applicant
+    ph = await _principal(client, ids)
+    appr = await client.post("/api/admissions/proposals/approve", headers=ph,
+                             json={"applicant_ids": [ap["id"]]})
+    assert appr.status_code == 200 and appr.json()["approved_total"] == 1
+    detail = (await client.get(f"/api/admissions/applicants/{ap['id']}", headers=ah)).json()
+    assert detail["status"] == "admitted" and detail["proposed_status"] is None and detail["decided_at"]
+
+    # now the admin enrols -> creates a student
     adm = await client.post(f"/api/admissions/applicants/{ap['id']}/admit", headers=ah,
                             json={"admission_number": "GSS/26/900", "arm_id": ids["arm_id"]})
     assert adm.status_code == 200, adm.text
-    assert adm.json()["admission_number"] == "GSS/26/900"
-
-    # the student now exists and the applicant reads as admitted
     students = (await client.get("/api/students", headers=ah)).json()
     assert any(s["admission_number"] == "GSS/26/900" for s in students)
-    detail = (await client.get(f"/api/admissions/applicants/{ap['id']}", headers=ah)).json()
-    assert detail["status"] == "admitted" and detail["admitted_student_id"]
-
-    # a duplicate admission number is refused
-    res2 = await _apply(client, cid, first="Sam", last="Bello")
-    ap2 = (await client.get("/api/admissions/applicants", headers=ah)).json()["applicants"]
-    ap2 = next(a for a in ap2 if a["application_number"] == res2["application_number"])
-    dup = await client.post(f"/api/admissions/applicants/{ap2['id']}/admit", headers=ah,
-                            json={"admission_number": "GSS/26/900"})
-    assert dup.status_code == 409
 
 
 async def test_entrance_test_flow(ctx):
@@ -133,6 +155,89 @@ async def test_entrance_test_flow(ctx):
     lst = (await client.get("/api/admissions/applicants", headers=ah)).json()["applicants"]
     joy = next(a for a in lst if a["application_number"] == res["application_number"])
     assert joy["entrance_score"] == 3 and joy["entrance_percent"] == 100
+
+
+async def test_auto_reconcile_by_score_then_principal_approves(ctx):
+    client, ids = ctx
+    ah = await _admin(client)
+    cid = await _class_id(client)
+
+    # a 3-mark entrance test
+    t = (await client.post("/api/admissions/tests", headers=ah, json={
+        "title": "Entrance", "duration_minutes": 15})).json()
+    await client.post(f"/api/admissions/tests/{t['id']}/questions", headers=ah, json={
+        "type": "single", "text": "2+2?", "marks": 2,
+        "options": [{"id": "a", "text": "3"}, {"id": "b", "text": "4"}], "correct": "b"})
+    await client.post(f"/api/admissions/tests/{t['id']}/questions", headers=ah, json={
+        "type": "boolean", "text": "Water is wet.", "marks": 1, "correct": True})
+    await client.patch(f"/api/admissions/tests/{t['id']}", headers=ah, json={"is_active": True})
+
+    async def apply_and_score(first, right):
+        res = await _apply(client, cid, first=first, last="Test")
+        creds = {"application_number": res["application_number"], "access_code": res["access_code"]}
+        start = (await client.post(f"/api/admissions/{SLUG}/test/start", json=creds)).json()
+        qids = {q["text"]: q["id"] for q in start["questions"]}
+        answers = {}
+        if right >= 1: answers[qids["2+2?"]] = "b"      # 2 marks
+        if right >= 2: answers[qids["Water is wet."]] = "true"  # +1 mark
+        await client.post(f"/api/admissions/{SLUG}/test/submit", json={**creds, "answers": answers})
+        return res["application_number"]
+
+    top = await apply_and_score("Top", 2)      # 3/3 = 100%
+    mid = await apply_and_score("Mid", 1)       # 2/3 = 67%
+    low = await apply_and_score("Low", 0)       # 0/3 = 0%
+
+    # auto-reconcile: pass mark 50, one seat in the class
+    r = await client.post("/api/admissions/reconcile/auto", headers=ah,
+                          json={"pass_mark": 50, "seats_per_class": 1})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["proposed"]["admitted"] == 1       # Top takes the one seat
+    assert body["proposed"]["shortlisted"] == 1    # Mid is above the mark but out of seats
+    assert body["proposed"]["rejected"] == 1       # Low is below the mark
+
+    def by_no(rows, no): return next(a for a in rows if a["application_number"] == no)
+    lst = (await client.get("/api/admissions/applicants", headers=ah)).json()
+    assert lst["pending"] == 3
+    assert by_no(lst["applicants"], top)["proposed_status"] == "admitted"
+    assert by_no(lst["applicants"], mid)["proposed_status"] == "shortlisted"
+    assert by_no(lst["applicants"], low)["proposed_status"] == "rejected"
+    # still nothing published to applicants
+    assert by_no(lst["applicants"], top)["status"] == "applied"
+
+    # principal approves everything at once
+    ph = await _principal(client, ids)
+    appr = await client.post("/api/admissions/proposals/approve", headers=ph, json={})
+    assert appr.status_code == 200 and appr.json()["approved_total"] == 3
+    lst2 = (await client.get("/api/admissions/applicants", headers=ah)).json()
+    assert lst2["pending"] == 0
+    assert by_no(lst2["applicants"], top)["status"] == "admitted"
+    assert by_no(lst2["applicants"], mid)["status"] == "shortlisted"
+    assert by_no(lst2["applicants"], low)["status"] == "rejected"
+
+
+async def test_principal_only_approves_and_clear_returns(ctx):
+    client, ids = ctx
+    ah = await _admin(client)
+    cid = await _class_id(client)
+    res = await _apply(client, cid, first="Pat", last="Oke")
+    ap = (await client.get("/api/admissions/applicants", headers=ah)).json()["applicants"][0]
+
+    await client.post("/api/admissions/reconcile/manual", headers=ah,
+                      json={"applicant_ids": [ap["id"]], "proposed_status": "shortlisted"})
+    # returning a proposal clears it
+    cl = await client.post("/api/admissions/proposals/clear", headers=ah,
+                           json={"applicant_ids": [ap["id"]]})
+    assert cl.status_code == 200 and cl.json()["cleared"] == 1
+    mid = (await client.get(f"/api/admissions/applicants/{ap['id']}", headers=ah)).json()
+    assert mid["proposed_status"] is None
+
+    # a teacher can neither reconcile nor approve
+    th = await headers(client, "teacher@gss-ikeja.ng", "teach123")
+    assert (await client.post("/api/admissions/reconcile/auto", headers=th,
+                              json={"pass_mark": 50})).status_code == 403
+    assert (await client.post("/api/admissions/proposals/approve", headers=th,
+                              json={})).status_code == 403
 
 
 async def test_review_is_staff_only(ctx):

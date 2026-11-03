@@ -32,6 +32,7 @@ from app.schemas.cbt import (
 from app.schemas.admissions import (
     ApplicationIn, ApplicantCredentials, EntranceSubmitIn,
     AdmTestIn, AdmTestPatch, AdmQuestionIn, ApplicantStatusIn, AdmitIn,
+    AutoReconcileIn, ManualProposeIn, ApplicantIdsIn,
 )
 from app.schemas.finance import (
     CategoryIn as ExpenseCategoryIn, ExpenseIn, IncomeIn, SalaryIn,
@@ -56,6 +57,7 @@ __all__ = [
     "ExamDetailOut", "SubmitIn",
     "ApplicationIn", "ApplicantCredentials", "EntranceSubmitIn",
     "AdmTestIn", "AdmTestPatch", "AdmQuestionIn", "ApplicantStatusIn", "AdmitIn",
+    "AutoReconcileIn", "ManualProposeIn", "ApplicantIdsIn",
     "ExpenseCategoryIn", "ExpenseIn", "IncomeIn", "SalaryIn",
     "PayrollRunIn", "PayslipAdjustIn",
 ]

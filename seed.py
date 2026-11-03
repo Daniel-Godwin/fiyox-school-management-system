@@ -38,6 +38,10 @@ async def main():
         db.add(User(school_id=school.id, email="admin@gss-ikeja.ng",
                     hashed_password=hash_password("admin123"),
                     role=Role.SCHOOL_ADMIN, first_name="Amaka", last_name="Okoro"))
+        db.add(User(school_id=school.id, email="principal@gss-ikeja.ng",
+                    hashed_password=hash_password("principal123"),
+                    role=Role.PRINCIPAL, first_name="Bola", last_name="Adeyemi",
+                    phone="+2348010000008"))
         db.add(User(school_id=school.id, email="bursar@gss-ikeja.ng",
                     hashed_password=hash_password("bursar123"),
                     role=Role.BURSAR, first_name="Chika", last_name="Nwosu",

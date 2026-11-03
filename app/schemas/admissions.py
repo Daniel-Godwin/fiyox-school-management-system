@@ -67,3 +67,27 @@ class ApplicantStatusIn(BaseModel):
 class AdmitIn(BaseModel):
     admission_number: str
     arm_id: str | None = None
+
+
+# ---------- bulk reconciliation + principal approval ----------
+class AutoReconcileIn(BaseModel):
+    """Propose decisions automatically from entrance-test scores."""
+    pass_mark: int = Field(50, ge=0, le=100)
+    # optional cap: admit at most this many (highest scorers) per applying class;
+    # those above the pass mark but beyond the cap are proposed for shortlisting
+    seats_per_class: int | None = Field(None, ge=1)
+    class_id: str | None = None          # limit the run to one applying class
+
+
+class ManualProposeIn(BaseModel):
+    """Propose one decision for a batch of selected applicants."""
+    applicant_ids: list[str] = Field(..., min_length=1)
+    proposed_status: str                 # shortlisted | admitted | rejected
+
+
+class ApplicantIdsIn(BaseModel):
+    """A batch of applicants (clear proposals, or approve a subset).
+
+    applicant_ids = null means 'all currently pending'.
+    """
+    applicant_ids: list[str] | None = None

@@ -29,6 +29,11 @@ REJECTED = "rejected"
 WITHDRAWN = "withdrawn"
 APPLICANT_STATUSES = (APPLIED, SHORTLISTED, ADMITTED, REJECTED, WITHDRAWN)
 
+# a reconciliation may propose one of these; the principal approves to finalise
+PROPOSABLE = (SHORTLISTED, ADMITTED, REJECTED)
+SRC_AUTO = "auto"
+SRC_MANUAL = "manual"
+
 
 class Applicant(Base, UUIDMixin, TimestampMixin, TenantMixin):
     """One application to a school."""
@@ -56,6 +61,16 @@ class Applicant(Base, UUIDMixin, TimestampMixin, TenantMixin):
 
     status: Mapped[str] = mapped_column(String(12), default=APPLIED)
     status_note: Mapped[str] = mapped_column(String(300), default="")
+
+    # a decision proposed by reconciliation (auto or manual) that is waiting for
+    # the principal to approve. The applicant-facing `status` only changes on
+    # approval, so no decision reaches the applicant before the principal signs
+    # off. One of SHORTLISTED / ADMITTED / REJECTED, or null when none pending.
+    proposed_status: Mapped[str | None] = mapped_column(String(12))
+    proposal_source: Mapped[str | None] = mapped_column(String(10))  # "auto" | "manual"
+    # who approved the decision, and when (the principal)
+    decided_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # entrance test result (null until sat)
     entrance_score: Mapped[float | None] = mapped_column(Float)

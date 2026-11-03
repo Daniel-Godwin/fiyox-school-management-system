@@ -26,10 +26,12 @@ from app.models.student import Student
 from app.models.admissions import (
     Applicant, AdmissionTest, AdmissionQuestion,
     APPLIED, SHORTLISTED, ADMITTED, REJECTED, WITHDRAWN, APPLICANT_STATUSES,
+    PROPOSABLE, SRC_AUTO, SRC_MANUAL,
 )
 from app.schemas import (
     ApplicationIn, ApplicantCredentials, EntranceSubmitIn,
     AdmTestIn, AdmTestPatch, AdmQuestionIn, ApplicantStatusIn, AdmitIn,
+    AutoReconcileIn, ManualProposeIn, ApplicantIdsIn,
 )
 from app.services.cbt import grade, student_view
 from app.services.admissions import (
@@ -41,6 +43,9 @@ router = APIRouter(prefix="/api/admissions", tags=["admissions"])
 
 ReviewRoles = Depends(require_roles(Role.SCHOOL_ADMIN, Role.PRINCIPAL))
 AdmitRoles = Depends(require_roles(Role.SCHOOL_ADMIN))
+# approving a proposed decision is the principal's responsibility (super admin
+# can act for the platform); the registrar/admin reconciles but cannot approve.
+ApproveRoles = Depends(require_roles(Role.PRINCIPAL, Role.SUPER_ADMIN))
 
 QUESTION_TYPES = ("single", "multiple", "boolean", "short")
 
@@ -272,10 +277,14 @@ async def _applicant_row(db, ap: Applicant, class_names: dict) -> dict:
         "previous_school": ap.previous_school,
         "status": ap.status,
         "status_note": ap.status_note,
+        "proposed_status": ap.proposed_status,
+        "proposal_source": ap.proposal_source,
+        "decided_at": str(ap.decided_at)[:16] if ap.decided_at else None,
         "entrance_score": ap.entrance_score,
         "entrance_max": ap.entrance_max,
         "entrance_percent": (round(ap.entrance_score / ap.entrance_max * 100)
                              if ap.entrance_max else None),
+        "entrance_taken": ap.entrance_taken_at is not None,
         "admitted_student_id": ap.admitted_student_id,
         "created_at": str(ap.created_at)[:16],
     }
@@ -288,7 +297,10 @@ async def list_applicants(db: DbDep, user: Annotated[User, ReviewRoles],
     school_id = tenant_scope(user)
     stmt = select(Applicant).where(Applicant.school_id == school_id,
                                    Applicant.deleted_at.is_(None))
-    if status:
+    if status == "pending":
+        # applicants with a proposed decision awaiting the principal
+        stmt = stmt.where(Applicant.proposed_status.is_not(None))
+    elif status:
         stmt = stmt.where(Applicant.status == status)
     if class_id:
         stmt = stmt.where(Applicant.applying_class_id == class_id)
@@ -297,14 +309,18 @@ async def list_applicants(db: DbDep, user: Annotated[User, ReviewRoles],
     class_names = {c.id: c.name for c in await _classes(db, school_id)}
 
     counts: dict[str, int] = {s: 0 for s in APPLICANT_STATUSES}
+    pending = 0
     allrows = (await db.execute(select(Applicant).where(
         Applicant.school_id == school_id,
         Applicant.deleted_at.is_(None)))).scalars().all()
     for a in allrows:
         counts[a.status] = counts.get(a.status, 0) + 1
+        if a.proposed_status:
+            pending += 1
+    counts["pending"] = pending
 
     return {
-        "counts": counts, "total": len(allrows),
+        "counts": counts, "total": len(allrows), "pending": pending,
         "applicants": [await _applicant_row(db, a, class_names) for a in rows],
     }
 
@@ -331,9 +347,18 @@ async def set_status(applicant_id: str, payload: ApplicantStatusIn, request: Req
     ap = await db.get(Applicant, applicant_id)
     if ap is None or ap.school_id != school_id or ap.deleted_at:
         raise HTTPException(404, "Applicant not found")
-    if payload.status not in (APPLIED, SHORTLISTED, REJECTED, WITHDRAWN):
-        raise HTTPException(422, "Use the Admit action to admit an applicant")
+    # shortlist / admit / reject are decisions — they go through the proposal +
+    # principal-approval path, not this endpoint. This one handles the two
+    # administrative resets only.
+    if payload.status not in (APPLIED, WITHDRAWN):
+        raise HTTPException(422, "Shortlist, admit and reject go through review and principal approval")
     ap.status = payload.status
+    if payload.status == APPLIED:
+        # returning to the pool clears any pending or past decision
+        ap.proposed_status = None
+        ap.proposal_source = None
+        ap.decided_by_id = None
+        ap.decided_at = None
     if payload.note is not None:
         ap.status_note = payload.note.strip()[:300]
     ap.updated_by = user.id
@@ -345,6 +370,159 @@ async def set_status(applicant_id: str, payload: ApplicantStatusIn, request: Req
     return {"id": ap.id, "status": ap.status}
 
 
+# ------------------------------------------------------------------
+# Reconciliation — produce *proposed* decisions (nothing the applicant
+# sees changes until the principal approves).
+# ------------------------------------------------------------------
+async def _open_applicants(db, school_id: str, class_id: str | None = None):
+    """Applicants still in play — not already admitted or withdrawn."""
+    stmt = select(Applicant).where(
+        Applicant.school_id == school_id,
+        Applicant.deleted_at.is_(None),
+        Applicant.status.notin_((ADMITTED, WITHDRAWN)))
+    if class_id:
+        stmt = stmt.where(Applicant.applying_class_id == class_id)
+    return (await db.execute(stmt)).scalars().all()
+
+
+@router.post("/reconcile/auto")
+async def reconcile_auto(payload: AutoReconcileIn, request: Request,
+                         db: DbDep, user: Annotated[User, ReviewRoles]):
+    """Propose decisions from entrance-test scores.
+
+    Only applicants who have sat the test are decided. With a seats cap, the
+    highest scorers (at or above the pass mark) in each class are proposed for
+    admission and the rest above the mark for shortlisting; everyone below the
+    mark is proposed as not successful.
+    """
+    school_id = tenant_scope(user)
+    applicants = await _open_applicants(db, school_id, payload.class_id)
+
+    tested = [a for a in applicants if a.entrance_max]
+    untested = len(applicants) - len(tested)
+
+    def percent(a: Applicant) -> float:
+        return (a.entrance_score or 0) / a.entrance_max * 100 if a.entrance_max else 0
+
+    # rank within each applying class, highest first
+    by_class: dict[str, list[Applicant]] = {}
+    for a in tested:
+        by_class.setdefault(a.applying_class_id, []).append(a)
+
+    proposed = {SHORTLISTED: 0, ADMITTED: 0, REJECTED: 0}
+    for cls_applicants in by_class.values():
+        cls_applicants.sort(key=percent, reverse=True)
+        seats_left = payload.seats_per_class
+        for a in cls_applicants:
+            if percent(a) < payload.pass_mark:
+                decision = REJECTED
+            elif seats_left is None:
+                decision = ADMITTED
+            elif seats_left > 0:
+                decision = ADMITTED
+                seats_left -= 1
+            else:
+                decision = SHORTLISTED      # above the mark but out of seats
+            a.proposed_status = decision
+            a.proposal_source = SRC_AUTO
+            a.updated_by = user.id
+            proposed[decision] += 1
+
+    await record_audit(db, school_id=school_id, user_id=user.id, action="update",
+                       table_name="applicants", record_id="auto-reconcile",
+                       changes={"pass_mark": {"new": payload.pass_mark},
+                                "proposed": {"new": sum(proposed.values())}},
+                       ip_address=request.client.host if request.client else None)
+    await db.commit()
+    return {"proposed": proposed, "proposed_total": sum(proposed.values()),
+            "not_tested": untested}
+
+
+@router.post("/reconcile/manual")
+async def reconcile_manual(payload: ManualProposeIn, request: Request,
+                           db: DbDep, user: Annotated[User, ReviewRoles]):
+    """Propose one decision for a batch of selected applicants."""
+    school_id = tenant_scope(user)
+    if payload.proposed_status not in PROPOSABLE:
+        raise HTTPException(422, "Decision must be shortlisted, admitted or rejected")
+    rows = (await db.execute(select(Applicant).where(
+        Applicant.school_id == school_id,
+        Applicant.id.in_(payload.applicant_ids),
+        Applicant.deleted_at.is_(None),
+        Applicant.status.notin_((ADMITTED, WITHDRAWN))))).scalars().all()
+    for a in rows:
+        a.proposed_status = payload.proposed_status
+        a.proposal_source = SRC_MANUAL
+        a.updated_by = user.id
+    await db.commit()
+    return {"proposed": len(rows), "proposed_status": payload.proposed_status}
+
+
+@router.post("/proposals/clear")
+async def clear_proposals(payload: ApplicantIdsIn, db: DbDep,
+                          user: Annotated[User, ReviewRoles]):
+    """Drop pending proposals (return them to review). No ids = clear all."""
+    school_id = tenant_scope(user)
+    stmt = select(Applicant).where(
+        Applicant.school_id == school_id,
+        Applicant.deleted_at.is_(None),
+        Applicant.proposed_status.is_not(None))
+    if payload.applicant_ids is not None:
+        stmt = stmt.where(Applicant.id.in_(payload.applicant_ids))
+    rows = (await db.execute(stmt)).scalars().all()
+    for a in rows:
+        a.proposed_status = None
+        a.proposal_source = None
+        a.updated_by = user.id
+    await db.commit()
+    return {"cleared": len(rows)}
+
+
+@router.get("/proposals/summary")
+async def proposals_summary(db: DbDep, user: Annotated[User, ReviewRoles]):
+    """A tally of what is waiting for the principal, by proposed decision."""
+    school_id = tenant_scope(user)
+    rows = (await db.execute(select(Applicant).where(
+        Applicant.school_id == school_id,
+        Applicant.deleted_at.is_(None),
+        Applicant.proposed_status.is_not(None)))).scalars().all()
+    tally = {SHORTLISTED: 0, ADMITTED: 0, REJECTED: 0}
+    for a in rows:
+        tally[a.proposed_status] = tally.get(a.proposed_status, 0) + 1
+    return {"pending": len(rows), "by_decision": tally}
+
+
+@router.post("/proposals/approve")
+async def approve_proposals(payload: ApplicantIdsIn, request: Request,
+                            db: DbDep, user: Annotated[User, ApproveRoles]):
+    """Principal signs off pending decisions — this is when they take effect
+    and first become visible to the applicant. No ids = approve all pending."""
+    school_id = tenant_scope(user)
+    stmt = select(Applicant).where(
+        Applicant.school_id == school_id,
+        Applicant.deleted_at.is_(None),
+        Applicant.proposed_status.is_not(None))
+    if payload.applicant_ids is not None:
+        stmt = stmt.where(Applicant.id.in_(payload.applicant_ids))
+    rows = (await db.execute(stmt)).scalars().all()
+
+    approved = {SHORTLISTED: 0, ADMITTED: 0, REJECTED: 0}
+    for a in rows:
+        decision = a.proposed_status
+        a.status = decision
+        a.proposed_status = None
+        a.decided_by_id = user.id
+        a.decided_at = _now()
+        a.updated_by = user.id
+        approved[decision] = approved.get(decision, 0) + 1
+    await record_audit(db, school_id=school_id, user_id=user.id, action="update",
+                       table_name="applicants", record_id="approve-proposals",
+                       changes={"approved": {"new": sum(approved.values())}},
+                       ip_address=request.client.host if request.client else None)
+    await db.commit()
+    return {"approved": approved, "approved_total": sum(approved.values())}
+
+
 @router.post("/applicants/{applicant_id}/admit")
 async def admit(applicant_id: str, payload: AdmitIn, request: Request,
                 db: DbDep, user: Annotated[User, AdmitRoles]):
@@ -352,6 +530,10 @@ async def admit(applicant_id: str, payload: AdmitIn, request: Request,
     ap = await db.get(Applicant, applicant_id)
     if ap is None or ap.school_id != school_id or ap.deleted_at:
         raise HTTPException(404, "Applicant not found")
+    # enrolment follows the admission decision: only an approved-admitted
+    # applicant can be turned into a student.
+    if ap.status != ADMITTED:
+        raise HTTPException(409, "Admission must be approved by the principal before enrolment")
     if not payload.admission_number.strip():
         raise HTTPException(422, "An admission number is required")
     # admission numbers are unique within a school
