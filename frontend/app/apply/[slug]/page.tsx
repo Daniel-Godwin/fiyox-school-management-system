@@ -195,23 +195,69 @@ export default function ApplyPage() {
                 {sErr && <p className="text-sm text-sanction">{sErr}</p>}
                 <button onClick={check} className="rounded-md bg-ink text-white px-5 py-2 text-sm font-medium hover:bg-ink-soft">Check</button>
 
-                {status && (
-                  <div className="rounded-lg border border-line p-4 mt-2">
-                    <p className="font-semibold">{status.name} · {status.applying_class}</p>
-                    <p className="mt-1 text-sm">Status: <span className="font-medium text-ink">{STATUS_LABEL[status.status] ?? status.status}</span></p>
-                    {status.entrance_available ? (
-                      <div className="mt-2">
-                        <p className="text-sm text-ink-soft mb-2">Your entrance test is ready. Take it when you are prepared.</p>
-                        <Link href={`/apply/${slug}/test?app=${encodeURIComponent(status.application_number)}&code=${encodeURIComponent(sCode.trim())}`}
-                              className="inline-block rounded-md bg-ink text-white px-4 py-2 text-sm font-medium hover:bg-ink-soft">Take the entrance test</Link>
+                {status && (() => {
+                  const pending = status.status === "applied" || status.status === "shortlisted";
+                  const badge: Record<string, string> = {
+                    admitted: "bg-ledger/10 text-ledger",
+                    rejected: "bg-sanction/10 text-sanction",
+                    shortlisted: "bg-brass/20 text-brass-ink",
+                    applied: "bg-ink/10 text-ink",
+                    withdrawn: "bg-line text-ink-soft",
+                  };
+                  return (
+                    <div className="rounded-lg border border-line p-4 mt-2 space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold">{status.name}</p>
+                          <p className="text-xs text-ink-soft">{status.applying_class} · {status.application_number}</p>
+                        </div>
+                        <span className={`shrink-0 inline-block rounded-full px-3 py-1 text-xs font-semibold ${badge[status.status] ?? "bg-ink/10 text-ink"}`}>
+                          {STATUS_LABEL[status.status] ?? status.status}
+                        </span>
                       </div>
-                    ) : status.entrance_taken ? (
-                      <p className="text-sm text-ink-soft mt-1">Entrance test completed. Keep checking this page — the school will update your status once results are ready.</p>
-                    ) : (
-                      <p className="text-sm text-ink-soft mt-1">Keep checking this page for updates on your application.</p>
-                    )}
-                  </div>
-                )}
+
+                      {/* a decision has been made — the outcome is the message, nothing about the test */}
+                      {status.status === "admitted" ? (
+                        <div className="rounded-md bg-ledger/5 border border-ledger/30 p-3">
+                          <p className="text-sm font-medium text-ledger">Congratulations — you have been offered admission.</p>
+                          <p className="text-sm text-ink-soft mt-1">
+                            The school will contact your parent or guardian with enrolment details and next steps.
+                            Please keep your application number for reference.
+                          </p>
+                        </div>
+                      ) : status.status === "rejected" ? (
+                        <div className="rounded-md bg-paper border border-line p-3">
+                          <p className="text-sm text-ink">Thank you for applying to {info.school.name}.</p>
+                          <p className="text-sm text-ink-soft mt-1">
+                            After careful review, we are unable to offer admission on this occasion.
+                            We wish the applicant every success.
+                          </p>
+                        </div>
+                      ) : status.status === "withdrawn" ? (
+                        <p className="text-sm text-ink-soft">This application has been withdrawn. Contact the school if this is unexpected.</p>
+                      ) : status.entrance_available ? (
+                        /* still pending and a test is waiting */
+                        <div>
+                          <p className="text-sm text-ink-soft mb-2">
+                            An entrance test is part of your application. You can take it whenever you are ready —
+                            you will read the instructions before the timer starts.
+                          </p>
+                          <Link href={`/apply/${slug}/test?app=${encodeURIComponent(status.application_number)}&code=${encodeURIComponent(sCode.trim())}`}
+                                className="inline-block rounded-md bg-ink text-white px-4 py-2 text-sm font-medium hover:bg-ink-soft">Take the entrance test</Link>
+                        </div>
+                      ) : (
+                        /* pending, nothing for the applicant to do */
+                        <p className="text-sm text-ink-soft">
+                          {status.status === "shortlisted"
+                            ? "You have been shortlisted. Your application is progressing — please keep checking this page for the final decision."
+                            : status.entrance_taken
+                              ? "Your application is complete and under review. Please keep checking this page for updates."
+                              : "Your application has been received and is under review. Please keep checking this page for updates."}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             )}
           </>
