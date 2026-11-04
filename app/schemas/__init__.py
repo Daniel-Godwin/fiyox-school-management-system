@@ -6,7 +6,7 @@ Each domain owns its own file (auth, school, student, results). New modules
 """
 from app.schemas.auth import Token, LoginIn, UserOut
 from app.schemas.school import SchoolCreate, SchoolOut
-from app.schemas.student import StudentCreate, StudentOut
+from app.schemas.student import StudentCreate, StudentOut, RenumberIn
 from app.schemas.results import (
     ComponentIn, ComponentOut, ScoreRow, BulkScoresIn, ComputeIn, TermResultUpdate,
 )
@@ -42,7 +42,7 @@ from app.schemas.finance import (
 __all__ = [
     "Token", "LoginIn", "UserOut",
     "SchoolCreate", "SchoolOut",
-    "StudentCreate", "StudentOut",
+    "StudentCreate", "StudentOut", "RenumberIn",
     "ComponentIn", "ComponentOut", "ScoreRow", "BulkScoresIn",
     "ComputeIn", "TermResultUpdate",
     "CategoryIn", "CategoryOut", "StructureIn", "StructureOut",

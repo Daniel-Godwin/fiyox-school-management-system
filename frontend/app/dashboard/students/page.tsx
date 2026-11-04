@@ -13,12 +13,22 @@ type Student = {
 };
 
 type Arm = { id: string; label: string };
+type RenumRow = { student_id: string; name: string; old: string; new: string; conflict: boolean };
 
 export default function StudentsPage() {
   const [students, setStudents] = useState<Student[] | null>(null);
   const [arms, setArms] = useState<Arm[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
+
+  // renumber a class (admin only)
+  const [role, setRole] = useState("");
+  const [schoolPrefix, setSchoolPrefix] = useState("");
+  const [rOpen, setROpen] = useState(false);
+  const [rForm, setRForm] = useState({ arm_id: "", prefix: "", year: "", start: "1" });
+  const [rPreview, setRPreview] = useState<RenumRow[] | null>(null);
+  const [rBusy, setRBusy] = useState(false);
+  const isAdmin = role === "school_admin" || role === "super_admin";
 
   // admit form
   const [open, setOpen] = useState(false);
@@ -43,6 +53,33 @@ export default function StudentsPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    api<{ role: string }>("/api/auth/me").then((m) => setRole(m.role)).catch(() => {});
+    api<{ admission_prefix: string | null }>("/api/schools/me")
+      .then((s) => setSchoolPrefix(s.admission_prefix ?? "")).catch(() => {});
+  }, []);
+
+  async function renumber(apply: boolean) {
+    if (!rForm.arm_id || !rForm.year.trim()) {
+      setNotice({ kind: "err", text: "Choose a class and a year." }); return;
+    }
+    setRBusy(true); setNotice(null);
+    try {
+      const res = await api<{ preview: RenumRow[]; count: number; conflicts: number; applied: boolean }>(
+        "/api/students/renumber", { method: "POST", body: JSON.stringify({
+          arm_id: rForm.arm_id, year: rForm.year.trim(),
+          prefix: rForm.prefix.trim() || null, start: Number(rForm.start) || 1, apply }) });
+      if (res.applied) {
+        setNotice({ kind: "ok", text: `Renumbered ${res.count} student(s).` });
+        setRPreview(null); setRForm({ arm_id: "", prefix: "", year: "", start: "1" }); load();
+      } else {
+        setRPreview(res.preview);
+        if (res.conflicts) setNotice({ kind: "err",
+          text: `${res.conflicts} new number(s) clash with students in other classes — change the year or start number.` });
+      }
+    } catch (e) { setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not renumber." }); }
+    finally { setRBusy(false); }
+  }
 
   function toggleSelect(id: string) {
     setSelected((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id]);
@@ -188,6 +225,85 @@ export default function StudentsPage() {
           </div>
         )}
       </section>
+
+      {/* ---- Renumber a class (admin only) ---- */}
+      {isAdmin && (
+        <section className="mt-3 rounded-lg border border-line bg-card">
+          <button onClick={() => setROpen(!rOpen)}
+                  className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium">
+            <span>Renumber a class</span>
+            <span aria-hidden className="text-ink-soft">{rOpen ? "▴" : "▾"}</span>
+          </button>
+          {rOpen && (
+            <div className="border-t border-line px-4 py-4 space-y-3">
+              <p className="text-xs text-ink-soft">
+                Re-sequence a whole class&apos;s admission numbers into your school&apos;s format. Set the year to the
+                students&apos; intake year (e.g. 25), preview the changes, then apply. Nothing changes until you apply.
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <label className="block col-span-2 sm:col-span-1">
+                  <span className="block text-xs text-ink-soft mb-1">Class</span>
+                  <select value={rForm.arm_id} onChange={(e) => { setRForm({ ...rForm, arm_id: e.target.value }); setRPreview(null); }}
+                          className="w-full rounded border border-line px-2 py-1.5 text-sm bg-white">
+                    <option value="">Select class…</option>
+                    {arms.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="block text-xs text-ink-soft mb-1">Prefix</span>
+                  <input value={rForm.prefix} onChange={(e) => { setRForm({ ...rForm, prefix: e.target.value.toUpperCase() }); setRPreview(null); }}
+                         placeholder={schoolPrefix || "FAD"} maxLength={12}
+                         className="w-full rounded border border-line px-2 py-1.5 text-sm" />
+                </label>
+                <label className="block">
+                  <span className="block text-xs text-ink-soft mb-1">Year</span>
+                  <input value={rForm.year} onChange={(e) => { setRForm({ ...rForm, year: e.target.value }); setRPreview(null); }}
+                         placeholder="25" maxLength={4}
+                         className="w-full rounded border border-line px-2 py-1.5 text-sm" />
+                </label>
+                <label className="block">
+                  <span className="block text-xs text-ink-soft mb-1">Start at</span>
+                  <input type="number" min={1} value={rForm.start} onChange={(e) => { setRForm({ ...rForm, start: e.target.value }); setRPreview(null); }}
+                         className="w-full rounded border border-line px-2 py-1.5 text-sm" />
+                </label>
+              </div>
+              <div className="flex items-center gap-3">
+                <button onClick={() => renumber(false)} disabled={rBusy}
+                        className="rounded-md border border-ink text-ink px-4 py-2 text-sm font-medium hover:bg-ink hover:text-white disabled:opacity-50">
+                  {rBusy ? "Working…" : "Preview"}
+                </button>
+                {notice && (
+                  <span role="status" className={`text-sm ${notice.kind === "ok" ? "text-ledger" : "text-sanction"}`}>{notice.text}</span>
+                )}
+              </div>
+
+              {rPreview && rPreview.length > 0 && (() => {
+                const conflicts = rPreview.filter((r) => r.conflict).length;
+                return (
+                  <div className="space-y-3">
+                    <ul className="rounded-lg border border-line divide-y divide-line overflow-hidden">
+                      {rPreview.map((r) => (
+                        <li key={r.student_id} className={`px-3 py-2 ${r.conflict ? "bg-sanction/10" : ""}`}>
+                          <p className="font-medium truncate">{r.name}</p>
+                          <p className="text-sm tabular text-ink-soft">
+                            {r.old} <span className="text-ink">→</span> <span className="font-semibold text-ink">{r.new}</span>
+                            {r.conflict && <span className="text-sanction"> · clashes with another class</span>}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                    <button onClick={() => renumber(true)} disabled={rBusy || conflicts > 0}
+                            className="rounded-md bg-ink text-white px-4 py-2 text-sm font-medium hover:bg-ink-soft disabled:opacity-50">
+                      {rBusy ? "Applying…" : `Apply to ${rPreview.length} student${rPreview.length === 1 ? "" : "s"}`}
+                    </button>
+                    {conflicts > 0 && <span className="ml-3 text-sm text-sanction">Resolve the clashes before applying.</span>}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+        </section>
+      )}
 
       {error && (
         <p role="alert" className="mt-6 text-sanction text-sm">
