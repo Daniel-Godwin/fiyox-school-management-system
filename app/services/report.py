@@ -11,6 +11,18 @@ from app.models.academics import Term, ClassArm, SchoolClass, Subject, AcademicS
 from app.models.results import AssessmentComponent, SubjectResult, TermResult
 
 
+def _grading_key(bands: list[dict]) -> list[dict]:
+    """Turn the school's grade bands into a printable key with ranges, e.g.
+    A1 75-100 Excellent, B2 70-74 Very Good, ... (highest band first)."""
+    hi_low = sorted(bands, key=lambda b: b["min"], reverse=True)
+    key = []
+    for i, b in enumerate(hi_low):
+        upper = 100 if i == 0 else hi_low[i - 1]["min"] - 1
+        key.append({"grade": b["grade"], "min": b["min"], "max": upper,
+                    "remark": b.get("remark", "")})
+    return key
+
+
 async def build_report_data(db: AsyncSession, school_id: str,
                             student_id: str, term_id: str) -> dict | None:
     student = await db.get(Student, student_id)
@@ -94,6 +106,30 @@ async def build_report_data(db: AsyncSession, school_id: str,
             "term": str(getattr(t.name, "value", t.name)).title(),
             "average": mine.get(t.id),
         } for t in session_terms]
+
+        # promotion outcome (Nigerian standard: promote if the year's average
+        # reaches the pass mark; the student in the highest class graduates). The
+        # admin's promotion run is authoritative; this is the card's statement.
+        PASS_MARK = 40.0
+        my_cum = cum_avg(mine)
+        promotion = None
+        if klass:
+            ladder = sorted((await db.execute(select(SchoolClass).where(
+                SchoolClass.school_id == school_id,
+                SchoolClass.deleted_at.is_(None)))).scalars().all(),
+                key=lambda c: (c.level_order, c.name))
+            ids = [c.id for c in ladder]
+            idx = ids.index(klass.id) if klass.id in ids else -1
+            nxt = ladder[idx + 1] if 0 <= idx < len(ladder) - 1 else None
+            if not mine:
+                promotion = {"action": "pending", "label": "Awaiting complete results"}
+            elif nxt is None:
+                promotion = {"action": "graduate", "label": "Graduates — completed the highest class"}
+            elif my_cum >= PASS_MARK:
+                promotion = {"action": "promote", "label": f"Promoted to {nxt.name}"}
+            else:
+                promotion = {"action": "repeat", "label": f"To repeat {klass.name}"}
+
         cumulative = {
             "session": sessn.name if (sessn := await db.get(
                 AcademicSession, term.session_id)) else "",
@@ -101,6 +137,7 @@ async def build_report_data(db: AsyncSession, school_id: str,
             "cumulative_average": cum_avg(mine),
             "cumulative_position": position,
             "class_size": len(by_student),
+            "promotion": promotion,
         }
 
     # attendance for the term — parents look for this as closely as the marks.
@@ -144,6 +181,7 @@ async def build_report_data(db: AsyncSession, school_id: str,
         "term": {"name": term.name if term else "",
                  "next_term_begins": str(term.next_term_begins) if term and term.next_term_begins else None},
         "components": [{"name": c.name, "max": c.max_score} for c in components],
+        "grading_key": _grading_key((school.grading_config or {}).get("bands", [])),
         "subjects": rows,
         "summary": {"grand_total": tr.grand_total, "average": tr.average,
                     "subjects_count": tr.subjects_count,

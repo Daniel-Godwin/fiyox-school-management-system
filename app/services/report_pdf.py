@@ -7,6 +7,7 @@ two comments that give the numbers meaning, closed by the principal's
 signature and the school stamp.
 """
 from io import BytesIO
+from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
@@ -184,14 +185,14 @@ def build_report_pdf(data: dict) -> bytes:
     if att.get("days_recorded"):
         pct = att.get("percentage")
         arows = [[
-            Paragraph(f"<b>School days</b><br/>{att['days_recorded']}", small),
-            Paragraph(f"<b>Present</b><br/>{att['present']}", small),
-            Paragraph(f"<b>Absent</b><br/>{att['absent']}", small),
+            Paragraph(f"<b>Times school opened</b><br/>{att['days_recorded']}", small),
+            Paragraph(f"<b>Times present</b><br/>{att['present']}", small),
+            Paragraph(f"<b>Times absent</b><br/>{att['absent']}", small),
             Paragraph(f"<b>Late</b><br/>{att['late']}", small),
             Paragraph(f"<b>Attendance</b><br/>{pct}%" if pct is not None
                       else "<b>Attendance</b><br/>-", small),
         ]]
-        at = Table(arows, colWidths=[34 * mm, 30 * mm, 30 * mm, 28 * mm, 60 * mm])
+        at = Table(arows, colWidths=[42 * mm, 34 * mm, 32 * mm, 24 * mm, 50 * mm])
         at.setStyle(TableStyle([
             ("BOX", (0, 0), (-1, -1), 0.6, brand),
             ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.lightgrey),
@@ -231,21 +232,36 @@ def build_report_pdf(data: dict) -> bytes:
             ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ]))
         story.append(cumt)
+        story.append(Spacer(1, 5))
+
+        # promotion outcome banner
+        promo = cum.get("promotion")
+        if promo:
+            tone = {"promote": colors.HexColor("#1F7A4D"),
+                    "graduate": colors.HexColor("#1F7A4D"),
+                    "repeat": colors.HexColor("#B4232A")}.get(promo["action"], brand)
+            promo_style = ParagraphStyle("promo", parent=small, textColor=colors.white,
+                                         alignment=TA_CENTER, fontSize=10)
+            prow = Table([[Paragraph(f"<b>RESULT: {escape(promo['label']).upper()}</b>", promo_style)]],
+                         colWidths=[182 * mm])
+            prow.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, -1), tone),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6)]))
+            story.append(prow)
         story.append(Spacer(1, 8))
 
-    # affective domain (optional)
+    # behaviour & character — inline badges rather than a table
     aff = data.get("affective") or {}
     if aff:
-        arows = [["Behaviour", "Rating"]] + [[k, str(v)] for k, v in aff.items()]
-        at = Table(arows, colWidths=[60 * mm, 25 * mm])
-        at.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E7EAF0")),
-            ("FONTSIZE", (0, 0), (-1, -1), 8),
-            ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
-            ("TOPPADDING", (0, 0), (-1, -1), 3),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-        ]))
-        story.append(at)
+        story.append(Paragraph("<b>Behaviour &amp; character</b>", small))
+        story.append(Spacer(1, 3))
+        chips = "&nbsp;&nbsp;".join(
+            f'<font backColor="#E7EAF0">&nbsp;{escape(str(k))}&nbsp;'
+            f'<b>{escape(str(v))}</b>&nbsp;</font>'
+            for k, v in aff.items())
+        badge = ParagraphStyle("badge", parent=small, leading=17)
+        story.append(Paragraph(chips, badge))
         story.append(Spacer(1, 8))
 
     # comments
@@ -270,7 +286,23 @@ def build_report_pdf(data: dict) -> bytes:
         ("RIGHTPADDING", (0, 0), (-1, -1), 6),
     ]))
     story.append(ctab)
-    story.append(Spacer(1, 10))
+    story.append(Spacer(1, 8))
+
+    # grading key — the scale parents read the grades against
+    gk = data.get("grading_key") or []
+    if gk:
+        legend = ParagraphStyle("legend", parent=small, fontSize=7.5,
+                                textColor=colors.HexColor("#444444"), leading=10)
+        parts = " &nbsp;&middot;&nbsp; ".join(
+            f"<b>{escape(g['grade'])}</b> {g['min']}-{g['max']} {escape(g['remark'])}"
+            for g in gk)
+        story.append(Paragraph(f"<b>Grading key:</b> {parts}", legend))
+        if aff:
+            story.append(Paragraph(
+                "<b>Behaviour key:</b> 5 Excellent &nbsp;&middot;&nbsp; 4 Very Good "
+                "&nbsp;&middot;&nbsp; 3 Good &nbsp;&middot;&nbsp; 2 Fair &nbsp;&middot;&nbsp; 1 Poor",
+                legend))
+        story.append(Spacer(1, 8))
 
     # signature + stamp
     sig = _image_flowable(school.get("signature_url"), 45 * mm, 16 * mm)
@@ -289,7 +321,17 @@ def build_report_pdf(data: dict) -> bytes:
     ]))
 
     stamp_cell = stamp if stamp else Paragraph("", small)
-    foot = Table([[sig_block, stamp_cell]], colWidths=[120 * mm, 62 * mm])
+    # a line for the parent/guardian to sign, acknowledging they saw the result
+    parent_block = Table([[Spacer(1, 14 * mm)],
+                          [Paragraph("_" * 30, small)],
+                          [Paragraph("<b>Parent / Guardian</b><br/>Signature &amp; date", small)]],
+                         colWidths=[62 * mm])
+    parent_block.setStyle(TableStyle([
+        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+    ]))
+    foot = Table([[sig_block, stamp_cell, parent_block]], colWidths=[70 * mm, 50 * mm, 62 * mm])
     foot.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
         ("ALIGN", (1, 0), (1, 0), "CENTER"),
