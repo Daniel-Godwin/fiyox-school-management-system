@@ -17,6 +17,8 @@ from app.schemas import (
 from app.services.results import compute_term
 from app.services.report import build_report_data
 from app.services.report_pdf import build_report_pdf
+from app.services.annual import build_annual_broadsheet, build_annual_report_data
+from app.services.annual_pdf import build_annual_pdf
 from app.services.audit import record_audit
 from app.services.teaching import assert_may_touch_scores
 
@@ -476,6 +478,43 @@ async def report_pdf(student_id: str, db: DbDep, user: CurrentUser,
     await _enforce_debt_gate(db, user, school_id, student_id, term_id)
     pdf = build_report_pdf(data)
     fname = f"report_{student.admission_number.replace('/', '-')}_{data['term']['name']}.pdf"
+    return StreamingResponse(BytesIO(pdf), media_type="application/pdf",
+                             headers={"Content-Disposition": f'inline; filename="{fname}"'})
+
+
+# ---------- Cumulative annual (end-of-session) report ----------
+AnnualRoles = Depends(require_roles(Role.SCHOOL_ADMIN, Role.PRINCIPAL, Role.TEACHER))
+
+
+@router.get("/results/annual", tags=["results"])
+async def annual_broadsheet(db: DbDep, user: Annotated[User, AnnualRoles],
+                            arm_id: str = Query(...), session_id: str = Query(...)):
+    school_id = tenant_scope(user)
+    return await build_annual_broadsheet(db, school_id, arm_id, session_id)
+
+
+@router.get("/results/annual/{student_id}", tags=["results"])
+async def annual_report_json(student_id: str, db: DbDep, user: Annotated[User, AnnualRoles],
+                             session_id: str = Query(...)):
+    school_id = tenant_scope(user)
+    data = await build_annual_report_data(db, school_id, student_id, session_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="No results for this student this session")
+    return data
+
+
+@router.get("/results/annual/{student_id}/pdf", tags=["results"])
+async def annual_report_pdf(student_id: str, db: DbDep, user: Annotated[User, AnnualRoles],
+                            session_id: str = Query(...)):
+    school_id = tenant_scope(user)
+    student = await db.get(Student, student_id)
+    if not student or student.school_id != school_id:
+        raise HTTPException(status_code=404, detail="Student not found")
+    data = await build_annual_report_data(db, school_id, student_id, session_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="No results for this student this session")
+    pdf = build_annual_pdf(data)
+    fname = f"annual_{student.admission_number.replace('/', '-')}_{data['session'].replace('/', '-')}.pdf"
     return StreamingResponse(BytesIO(pdf), media_type="application/pdf",
                              headers={"Content-Disposition": f'inline; filename="{fname}"'})
 

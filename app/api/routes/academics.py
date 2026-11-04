@@ -9,6 +9,15 @@ from app.models.academics import AcademicSession, Term, SchoolClass, ClassArm, S
 router = APIRouter(prefix="/api/academics", tags=["academics"])
 
 
+@router.get("/sessions")
+async def list_sessions(db: DbDep, user: CurrentUser):
+    school_id = tenant_scope(user)
+    rows = (await db.execute(select(AcademicSession).where(
+        AcademicSession.school_id == school_id))).scalars().all()
+    rows = sorted(rows, key=lambda s: s.name, reverse=True)
+    return [{"id": s.id, "name": s.name, "is_current": s.is_current} for s in rows]
+
+
 @router.get("/terms")
 async def list_terms(db: DbDep, user: CurrentUser):
     school_id = tenant_scope(user)
