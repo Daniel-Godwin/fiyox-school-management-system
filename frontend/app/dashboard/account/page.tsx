@@ -57,8 +57,8 @@ export default function AccountPage() {
       const r = await api<{ sent: boolean; note: string }>("/api/verify/request", {
         method: "POST", body: JSON.stringify({ channel: "email" }),
       });
-      setCodeSent(true);
-      setVNotice({ kind: "ok", text: r.note });
+      setCodeSent(r.sent);
+      setVNotice({ kind: r.sent ? "ok" : "err", text: r.note });
     } catch (e) {
       setVNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not send the code." });
     } finally { setVBusy(false); }
