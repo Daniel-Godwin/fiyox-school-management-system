@@ -42,6 +42,8 @@ export default function SetupPage() {
   const [admPad, setAdmPad] = useState(3);
   const [newTrait, setNewTrait] = useState("");
   const [newPsy, setNewPsy] = useState("");
+  const [gbands, setGbands] = useState<{ grade: string; min: number; remark: string }[]>([]);
+  const [gIsWaec, setGIsWaec] = useState(true);
   const [bank, setBank] = useState<CommentBankEntry[]>([]);
   const [newComment, setNewComment] = useState<{ text: string; min: string; max: string; audience: "form_teacher" | "principal" }>(
     { text: "", min: "0", max: "100", audience: "form_teacher" });
@@ -228,6 +230,52 @@ export default function SetupPage() {
     catch { /* non-fatal */ }
   }, []);
   useEffect(() => { loadBank(); }, [loadBank]);
+
+  const loadGrading = useCallback(async () => {
+    try {
+      const g = await api<{ bands: { grade: string; min: number; remark: string }[]; is_waec: boolean }>("/api/schools/me/grading");
+      setGbands(g.bands.map((b) => ({ grade: b.grade, min: b.min, remark: b.remark })));
+      setGIsWaec(g.is_waec);
+    } catch { /* non-fatal */ }
+  }, []);
+  useEffect(() => { loadGrading(); }, [loadGrading]);
+
+  function editBand(i: number, key: "grade" | "min" | "remark", value: string) {
+    setGbands((bs) => bs.map((b, j) => j === i
+      ? { ...b, [key]: key === "min" ? (Number(value.replace(/[^0-9]/g, "")) || 0) : value }
+      : b));
+  }
+  function addBand() { setGbands((bs) => [...bs, { grade: "", min: 0, remark: "" }]); }
+  function removeBand(i: number) { setGbands((bs) => bs.filter((_, j) => j !== i)); }
+
+  async function useWaec() {
+    setBusy("grading");
+    try {
+      await api("/api/schools/me/grading/reset", { method: "POST" });
+      await loadGrading();
+      toast.ok("Grading set to the WAEC standard.");
+    } catch { toast.err("Could not reset the grading system."); }
+    finally { setBusy(null); }
+  }
+  async function saveGrading() {
+    const bands = gbands.map((b) => ({ grade: b.grade.trim(), min: b.min, remark: b.remark.trim() }))
+                        .filter((b) => b.grade);
+    if (bands.length === 0) { toast.err("Add at least one grade band."); return; }
+    if (!bands.some((b) => b.min === 0)) { toast.err("The lowest band must start at 0."); return; }
+    const mins = bands.map((b) => b.min);
+    if (new Set(mins).size !== mins.length) { toast.err("Two bands cannot start at the same score."); return; }
+    setBusy("grading");
+    try {
+      await api("/api/schools/me/grading", { method: "PUT", body: JSON.stringify({ bands }) });
+      await loadGrading();
+      toast.ok("Grading system saved.");
+    } catch (e) { toast.err(e instanceof ApiError ? e.message : "Could not save the grading system."); }
+    finally { setBusy(null); }
+  }
+
+  // sorted high -> low with derived upper bound, for display
+  const gradingRows = [...gbands.map((b, i) => ({ ...b, i }))].sort((a, b) => b.min - a.min)
+    .map((b, idx, arr) => ({ ...b, max: idx === 0 ? 100 : arr[idx - 1].min - 1 }));
 
   async function saveTraits(next: string[]) {
     setBusy("traits");
@@ -734,6 +782,78 @@ export default function SetupPage() {
               Results pass through the approval gate before publishing.
             </p>
           )}
+        </section>
+      )}
+
+      {/* grading system */}
+      {school && (
+        <section className="rounded-lg border border-line bg-card p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+            <p className="text-sm font-medium">Grading system</p>
+            <span className={`text-xs rounded-full px-2.5 py-0.5 ${gIsWaec ? "bg-ledger/10 text-ledger" : "bg-brass/15 text-brass-ink"}`}>
+              {gIsWaec ? "WAEC standard" : "Custom"}
+            </span>
+          </div>
+          <p className="text-xs text-ink-soft mb-3">
+            The grade each score earns on report cards and results. Use the WAEC
+            standard, or set your school&apos;s own bands. Each band&apos;s range runs from
+            its start score up to the next band — the lowest must start at 0. Changing
+            this applies to results the next time they are computed.
+          </p>
+
+          <div className="overflow-x-auto rounded-lg border border-line">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-ink text-white text-left">
+                  <th className="px-3 py-2 font-medium">Grade</th>
+                  <th className="px-3 py-2 font-medium">From (%)</th>
+                  <th className="px-3 py-2 font-medium">Range</th>
+                  <th className="px-3 py-2 font-medium">Remark</th>
+                  <th className="px-2 py-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {gradingRows.map((b) => (
+                  <tr key={b.i} className="border-t border-line">
+                    <td className="px-3 py-1.5">
+                      <input value={b.grade} onChange={(e) => editBand(b.i, "grade", e.target.value)}
+                             placeholder="A1" maxLength={6}
+                             className="w-16 rounded border border-line px-2 py-1 text-sm" />
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <input value={String(b.min)} onChange={(e) => editBand(b.i, "min", e.target.value)}
+                             inputMode="numeric"
+                             className="w-16 rounded border border-line px-2 py-1 text-sm tabular" />
+                    </td>
+                    <td className="px-3 py-1.5 tabular text-ink-soft">{b.min}–{b.max}</td>
+                    <td className="px-3 py-1.5">
+                      <input value={b.remark} onChange={(e) => editBand(b.i, "remark", e.target.value)}
+                             placeholder="e.g. Credit" maxLength={40}
+                             className="w-full min-w-[7rem] rounded border border-line px-2 py-1 text-sm" />
+                    </td>
+                    <td className="px-2 py-1.5 text-right">
+                      <button onClick={() => removeBand(b.i)} aria-label={`Remove ${b.grade}`}
+                              className="text-sanction text-xs hover:underline">Remove</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button onClick={addBand} className="rounded-md border border-line px-3 py-1.5 text-sm font-medium hover:border-ink">+ Add band</button>
+            <button onClick={saveGrading} disabled={busy === "grading"}
+                    className="rounded-md bg-ink text-white px-4 py-1.5 text-sm font-medium hover:bg-ink-soft disabled:opacity-50">
+              {busy === "grading" ? "Saving…" : "Save grading system"}
+            </button>
+            {!gIsWaec && (
+              <button onClick={useWaec} disabled={busy === "grading"}
+                      className="rounded-md border border-ink text-ink px-3 py-1.5 text-sm font-medium hover:bg-ink hover:text-white disabled:opacity-50">
+                Reset to WAEC standard
+              </button>
+            )}
+          </div>
         </section>
       )}
 

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from app.core.deps import DbDep, require_roles
 from app.core.security import hash_password
-from app.models.school import School, User, Role
+from app.models.school import School, User, Role, DEFAULT_GRADING
 from app.schemas import SchoolCreate, SchoolOut
 import secrets as _secrets
 from pydantic import BaseModel, EmailStr
@@ -181,6 +181,96 @@ async def update_my_school(
         "online_payments_enabled": school.online_payments_enabled,
         "updated": list(changes.keys()),
     }
+
+
+# ==================================================================
+# Grading system — a school keeps the WAEC bands or defines its own
+# ==================================================================
+import copy as _copy
+
+
+class GradingBand(BaseModel):
+    grade: str = Field(..., min_length=1, max_length=6)
+    min: int = Field(..., ge=0, le=100)
+    remark: str = Field("", max_length=40)
+
+
+class GradingBandsIn(BaseModel):
+    bands: list[GradingBand] = Field(..., min_length=1, max_length=20)
+
+
+def _bands_with_ranges(bands: list[dict]) -> list[dict]:
+    """Attach each band's upper bound, highest first (A1 75-100, ...)."""
+    hi_low = sorted(bands, key=lambda b: b["min"], reverse=True)
+    out = []
+    for i, b in enumerate(hi_low):
+        upper = 100 if i == 0 else hi_low[i - 1]["min"] - 1
+        out.append({"grade": b["grade"], "min": b["min"], "max": upper,
+                    "remark": b.get("remark", "")})
+    return out
+
+
+def _is_waec(bands: list[dict]) -> bool:
+    waec = {(b["grade"], b["min"]) for b in DEFAULT_GRADING["bands"]}
+    return {(b["grade"], b["min"]) for b in bands} == waec
+
+
+@router.get("/me/grading", tags=["schools"])
+async def get_grading(db: DbDep, user: Annotated[User, Depends(require_roles(
+        Role.SCHOOL_ADMIN, Role.PRINCIPAL, Role.TEACHER))]):
+    school_id = tenant_scope(user)
+    school = await db.get(School, school_id)
+    if not school:
+        raise HTTPException(404, "School not found")
+    bands = (school.grading_config or {}).get("bands", []) or DEFAULT_GRADING["bands"]
+    return {"bands": _bands_with_ranges(bands), "is_waec": _is_waec(bands),
+            "waec": _bands_with_ranges(DEFAULT_GRADING["bands"])}
+
+
+@router.put("/me/grading", tags=["schools"])
+async def set_grading(payload: GradingBandsIn, request: Request, db: DbDep,
+                      user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN))]):
+    school_id = tenant_scope(user)
+    school = await db.get(School, school_id)
+    if not school:
+        raise HTTPException(404, "School not found")
+
+    bands = [{"grade": b.grade.strip(), "min": b.min, "remark": b.remark.strip()}
+             for b in payload.bands]
+    mins = [b["min"] for b in bands]
+    if len(set(mins)) != len(mins):
+        raise HTTPException(422, "Two bands cannot start at the same score")
+    if min(mins) != 0:
+        raise HTTPException(422, "The lowest band must start at 0 so every score has a grade")
+    if any(not b["grade"] for b in bands):
+        raise HTTPException(422, "Every band needs a grade label")
+
+    cfg = _copy.deepcopy(school.grading_config or DEFAULT_GRADING)
+    cfg["bands"] = sorted(bands, key=lambda b: b["min"], reverse=True)
+    school.grading_config = cfg
+    school.updated_by = user.id
+    await record_audit(db, school_id=school_id, user_id=user.id, action="update",
+                       table_name="schools", record_id=school.id,
+                       changes={"grading_bands": {"new": len(bands)}},
+                       ip_address=request.client.host if request.client else None)
+    await db.commit()
+    return {"bands": _bands_with_ranges(cfg["bands"]), "is_waec": _is_waec(cfg["bands"])}
+
+
+@router.post("/me/grading/reset", tags=["schools"])
+async def reset_grading(request: Request, db: DbDep,
+                        user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN))]):
+    """Restore the WAEC standard bands."""
+    school_id = tenant_scope(user)
+    school = await db.get(School, school_id)
+    if not school:
+        raise HTTPException(404, "School not found")
+    cfg = _copy.deepcopy(school.grading_config or DEFAULT_GRADING)
+    cfg["bands"] = _copy.deepcopy(DEFAULT_GRADING["bands"])
+    school.grading_config = cfg
+    school.updated_by = user.id
+    await db.commit()
+    return {"bands": _bands_with_ranges(cfg["bands"]), "is_waec": True}
 
 
 # ---------- Branding assets (logo, signature, stamp) ----------
