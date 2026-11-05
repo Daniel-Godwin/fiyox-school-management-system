@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, openPdf, downloadFile, ApiError } from "@/lib/api";
+import { cachedGet, queuedPost, putCache } from "@/lib/offline/offlineApi";
 
 type Term = { id: string; name: string; session: string; is_current: boolean };
 type Arm = { id: string; label: string };
@@ -80,14 +81,14 @@ export default function FeesPage() {
 
   useEffect(() => {
     Promise.all([
-      api<Term[]>("/api/academics/terms"),
-      api<Arm[]>("/api/academics/arms"),
-      api<Student[]>("/api/students"),
+      cachedGet<Term[]>("/api/academics/terms"),
+      cachedGet<Arm[]>("/api/academics/arms"),
+      cachedGet<Student[]>("/api/students"),
     ]).then(([t, a, s]) => {
-      setTerms(t); setArms(a); setStudents(s);
-      const current = t.find((x) => x.is_current);
+      setTerms(t.data); setArms(a.data); setStudents(s.data);
+      const current = t.data.find((x) => x.is_current);
       if (current) setTermId(current.id);
-    }).catch(() => setNotice({ kind: "err", text: "Could not load lists. Is the backend running?" }));
+    }).catch(() => setNotice({ kind: "err", text: "Could not load lists. Open this page once while online so it can be used offline later." }));
   }, []);
 
   const nameOf = useMemo(() => {
@@ -103,21 +104,24 @@ export default function FeesPage() {
     if (!termId) return;
     try {
       const [sum, invs, cats, structs] = await Promise.all([
-        api<Summary>(`/api/fees/summary?term_id=${termId}`),
-        api<Invoice[]>(`/api/fees/invoices?term_id=${termId}`),
-        api<Category[]>("/api/fees/categories"),
-        api<Structure[]>(`/api/fees/structures?term_id=${termId}`),
+        cachedGet<Summary>(`/api/fees/summary?term_id=${termId}`),
+        cachedGet<Invoice[]>(`/api/fees/invoices?term_id=${termId}`),
+        cachedGet<Category[]>("/api/fees/categories"),
+        cachedGet<Structure[]>(`/api/fees/structures?term_id=${termId}`),
       ]);
-      setSummary(sum);
-      setInvoices(invs.sort((a, b) => b.balance - a.balance));
-      setCategories(cats);
-      setStructures(structs);
+      setSummary(sum.data);
+      setInvoices([...invs.data].sort((a, b) => b.balance - a.balance));
+      setCategories(cats.data);
+      setStructures(structs.data);
+      if (invs.stale) {
+        setNotice({ kind: "ok", text: "You're offline — showing the last saved copy. Payments you record will sync automatically." });
+      }
     } catch (e) {
       setNotice({
         kind: "err",
         text: e instanceof ApiError && e.status === 403
           ? "Fees are visible to the bursar and school admin only."
-          : "Could not load fees data.",
+          : "Could not load fees data. Open this page once while online to use it offline.",
       });
     }
   }, [termId]);
@@ -276,13 +280,36 @@ export default function FeesPage() {
       setNotice({ kind: "err", text: "Enter a positive amount and a reference (e.g. teller or transfer number)." });
       return;
     }
+    const reference = pay.reference.trim();
     setBusy(inv.id); setNotice(null);
     try {
-      const res = await api<{ payment_id: string; duplicate: boolean; invoice: Invoice }>(
+      // the reference is the server's idempotency key and the outbox replays the
+      // same body, so a queued payment can never post twice — safe to record offline
+      const r = await queuedPost<{ payment_id: string; duplicate: boolean; invoice: Invoice }>(
         "/api/fees/payments",
-        { method: "POST", body: JSON.stringify({
-            invoice_id: inv.id, method: pay.method, reference: pay.reference.trim(), amount }) },
+        { invoice_id: inv.id, method: pay.method, reference, amount },
+        `Payment — ${nameOf(inv.student_id)}, ${inv.invoice_number}, ${ngn(amount)}`,
       );
+      if (r.queued) {
+        // optimistically reduce the balance locally and in the cache so the
+        // bursar sees it reflected, and keep the printed/receipt step for later
+        const newPaid = inv.paid + amount;
+        const newBalance = inv.balance - amount;
+        const next: Invoice = {
+          ...inv, paid: newPaid, balance: newBalance,
+          status: newBalance <= 0 ? "paid" : "part_paid",
+        };
+        setInvoices((prev) => prev.map((x) => (x.id === inv.id ? next : x))
+                                   .sort((a, b) => b.balance - a.balance));
+        void putCache(
+          `/api/fees/invoices?term_id=${termId}`,
+          invoices.map((x) => (x.id === inv.id ? next : x)),
+        );
+        setNotice({ kind: "ok", text: "Payment saved on this device — it will sync automatically when you're back online. Print the receipt once it has synced." });
+        setPayOpen(null);
+        return;
+      }
+      const res = r.result!;
       setLastReceipt((prev) => ({ ...prev, [inv.id]: res.payment_id }));
       setNotice({
         kind: "ok",

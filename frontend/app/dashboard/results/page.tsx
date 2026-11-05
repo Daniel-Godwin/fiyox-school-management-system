@@ -1,7 +1,8 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useState } from "react";
-import { api, me, openPdf, User, ApiError } from "@/lib/api";
+import { api, openPdf, User, ApiError } from "@/lib/api";
+import { cachedGet, queuedPost, putCache } from "@/lib/offline/offlineApi";
 
 type Term = { id: string; name: string; session: string; is_current: boolean };
 type Arm = { id: string; label: string };
@@ -45,18 +46,22 @@ export default function ResultsPage() {
   const [approvalOn, setApprovalOn] = useState(false);
 
   useEffect(() => {
-    Promise.all([me(), api<Term[]>("/api/academics/terms"), api<Arm[]>("/api/academics/arms")])
+    Promise.all([
+      cachedGet<User>("/api/auth/me"),
+      cachedGet<Term[]>("/api/academics/terms"),
+      cachedGet<Arm[]>("/api/academics/arms"),
+    ])
       .then(([u, t, a]) => {
-        setUser(u);
-        setTerms(t);
-        setArms(a);
-        const current = t.find((x) => x.is_current);
+        setUser(u.data);
+        setTerms(t.data);
+        setArms(a.data);
+        const current = t.data.find((x) => x.is_current);
         if (current) setTermId(current.id);
       })
-      .catch(() => setNotice({ kind: "err", text: "Could not load class lists. Is the backend running?" }));
+      .catch(() => setNotice({ kind: "err", text: "Could not load class lists. Open this page once while online so it can be used offline later." }));
     // does this school route results through the approval gate?
-    api<{ result_approval_required: boolean }>("/api/schools/me")
-      .then((s) => setApprovalOn(!!s.result_approval_required))
+    cachedGet<{ result_approval_required: boolean }>("/api/schools/me")
+      .then((s) => setApprovalOn(!!s.data.result_approval_required))
       .catch(() => setApprovalOn(false));
   }, []);
 
@@ -67,10 +72,13 @@ export default function ResultsPage() {
     if (!ready) return;
     setNotice(null);
     try {
-      const data = await api<Row[]>(`/api/results?arm_id=${armId}&term_id=${termId}`);
-      setRows(data);
+      const data = await cachedGet<Row[]>(`/api/results?arm_id=${armId}&term_id=${termId}`);
+      setRows(data.data);
+      if (data.stale) {
+        setNotice({ kind: "ok", text: "You're offline — showing the last saved copy. Ratings you enter will sync automatically." });
+      }
     } catch {
-      setNotice({ kind: "err", text: "Could not load results." });
+      setNotice({ kind: "err", text: "Could not load results. Open this page once while online to use it offline." });
     }
   }, [ready, armId, termId]);
 
@@ -159,8 +167,9 @@ export default function ResultsPage() {
   async function openGrid(kind: "affective" | "psychomotor") {
     setBusy(kind === "affective" ? "grid-load" : "grid-load-psy"); setNotice(null);
     try {
-      const g = await api<{ traits: string[]; students: typeof gridRows }>(
+      const gg = await cachedGet<{ traits: string[]; students: typeof gridRows }>(
         `/api/results/${kind}?arm_id=${armId}&term_id=${termId}`);
+      const g = gg.data;
       setGridKind(kind);
       setGridTraits(g.traits);
       setGridRows(g.students);
@@ -188,13 +197,28 @@ export default function ResultsPage() {
     try {
       const ratings: Record<string, Record<string, number>> = {};
       for (const r of gridRows) ratings[r.student_id] = r.ratings;
-      const res = await api<{ saved: number }>(`/api/results/${gridKind}`, {
-        method: "POST", body: JSON.stringify({ arm_id: armId, term_id: termId, ratings }) });
       const what = gridKind === "affective" ? "Character" : "Skill";
-      setNotice({ kind: "ok", text: `${what} ratings saved for ${res.saved} student${res.saved === 1 ? "" : "s"}.` });
+      const cls = arms.find((a) => a.id === armId)?.label ?? "class";
+      // upsert keyed by student+trait+term on the server, so a replay is harmless
+      const r = await queuedPost<{ saved: number }>(
+        `/api/results/${gridKind}`,
+        { arm_id: armId, term_id: termId, ratings },
+        `${what} ratings — ${cls}`,
+      );
+      if (r.queued) {
+        // keep the entered ratings in the cache so reopening the grid shows them
+        void putCache(
+          `/api/results/${gridKind}?arm_id=${armId}&term_id=${termId}`,
+          { traits: gridTraits, students: gridRows },
+        );
+        setNotice({ kind: "ok", text: "Ratings saved on this device — they will sync automatically when you're back online." });
+      } else {
+        const n = r.result?.saved ?? 0;
+        setNotice({ kind: "ok", text: `${what} ratings saved for ${n} student${n === 1 ? "" : "s"}.` });
+      }
       setGridOpen(false);
-    } catch {
-      setNotice({ kind: "err", text: "Could not save the ratings." });
+    } catch (e) {
+      setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not save the ratings." });
     } finally { setBusy(null); }
   }
 
