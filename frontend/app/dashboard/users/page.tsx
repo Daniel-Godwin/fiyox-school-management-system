@@ -324,6 +324,19 @@ export default function UsersPage() {
       </span>
     ) : null;
 
+  // flag staff whose email is not verified — catches fake/placeholder addresses
+  // left over from testing before a pilot goes live
+  const STAFF = ["school_admin", "principal", "bursar", "teacher"];
+  const emailBadge = (u: UserRow) =>
+    STAFF.includes(u.role) && u.email ? (
+      <span
+        title={u.email_verified ? "Email verified" : "Email not verified — may be a placeholder; correct it and ask the staff member to verify"}
+        className={`ml-2 inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+          u.email_verified ? "bg-ledger/10 text-ledger" : "bg-brass/15 text-brass-ink"}`}>
+        {u.email_verified ? "✓ email" : "email unverified"}
+      </span>
+    ) : null;
+
   const statusBadge = (u: UserRow) => (
     <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
       u.is_active ? "bg-ledger/10 text-ledger" : "bg-sanction/10 text-sanction"}`}>
@@ -654,7 +667,7 @@ export default function UsersPage() {
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <p className="font-medium">{u.first_name} {u.last_name}{phoneBadge(u)}</p>
-                <p className="text-xs text-ink-soft break-all mt-0.5">{u.email}</p>
+                <p className="text-xs text-ink-soft break-all mt-0.5">{u.email}{emailBadge(u)}</p>
                 <p className="text-xs text-ink-soft mt-0.5">{ROLE_LABEL[u.role] ?? u.role}</p>
               </div>
               <span className="shrink-0">{statusBadge(u)}</span>
@@ -684,7 +697,7 @@ export default function UsersPage() {
                 <td className="px-3 py-2 whitespace-nowrap">
                   {u.first_name} {u.last_name}{phoneBadge(u)}
                 </td>
-                <td className="px-3 py-2">{u.email}</td>
+                <td className="px-3 py-2">{u.email}{emailBadge(u)}</td>
                 <td className="px-3 py-2">{ROLE_LABEL[u.role] ?? u.role}</td>
                 <td className="px-3 py-2">{statusBadge(u)}</td>
                 <td className="px-3 py-2 text-right">

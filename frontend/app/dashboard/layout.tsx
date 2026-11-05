@@ -164,6 +164,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       </aside>
 
       <main className="p-4 sm:p-5 md:p-8 max-w-full overflow-x-hidden">
+        {user.email && !user.email_verified &&
+          ["school_admin", "principal", "bursar", "teacher"].includes(user.role) && (
+          <Link href="/dashboard/account"
+                className="mb-4 flex items-center gap-2 rounded-md border border-brass/40 bg-brass/10 px-4 py-2.5 text-sm text-brass-ink hover:bg-brass/20">
+            <span className="h-1.5 w-1.5 rounded-full bg-brass shrink-0" />
+            Your email isn&apos;t verified yet — tap to verify {user.email}.
+          </Link>
+        )}
         <ToastProvider>{children}</ToastProvider>
       </main>
     </div>

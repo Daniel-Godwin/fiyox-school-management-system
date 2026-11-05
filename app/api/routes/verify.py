@@ -21,7 +21,9 @@ from app.core.deps import CurrentUser, DbDep
 from app.models.notifications import MessagePurpose
 from app.models.verification import VerificationCode, VerifyChannel, VerifyPurpose
 from app.services.audit import record_audit
-from app.services.notify import get_provider, send_sms_and_log
+from app.services.notify import (
+    get_provider, send_sms_and_log, get_email_provider, send_email_and_log,
+)
 
 router = APIRouter(prefix="/api/verify", tags=["verification"])
 
@@ -100,14 +102,25 @@ async def request_code(payload: RequestIn, request: Request, db: DbDep,
                      f"A code was sent to {contact[:4]}…{contact[-3:]}."),
         }
 
-    # email: no mail provider is wired yet, so be honest rather than pretend
+    # email
+    await send_email_and_log(
+        db, school_id=school_id, to=contact,
+        subject="Your Fiyox verification code",
+        body=(f"Your Fiyox verification code is {code}.\n\n"
+              f"It expires in {CODE_TTL_MINUTES} minutes. If you did not request "
+              f"this, you can ignore this email."),
+        purpose=MessagePurpose.ANNOUNCEMENT,
+        recipient_user_id=user.id, created_by=user.id)
     await db.commit()
+    provider = get_email_provider()
     return {
-        "sent": False,
+        "sent": True,
         "channel": "email",
-        "note": ("Email delivery is not configured yet. Phone verification is "
-                 "available now; email will follow when the school connects a "
-                 "mail provider."),
+        "expires_in_minutes": CODE_TTL_MINUTES,
+        "note": ("The code was logged but NOT delivered — email is in preview "
+                 "mode until the school sets SMTP_HOST."
+                 if provider.name == "mock" else
+                 f"A code was sent to {contact}. Check your inbox (and spam folder)."),
     }
 
 
@@ -171,10 +184,10 @@ async def verification_availability(user: CurrentUser):
     arrive. When SMS is in preview mode (no Termii key), phone verification is
     reported unavailable and the banner simply does not render.
     """
-    from app.services.notify import get_provider
+    from app.services.notify import get_provider, get_email_provider
     from app.services.paystack import gateway_configured
     return {
         "phone": get_provider().name != "mock",
-        "email": False,   # becomes true when a mail provider is wired
+        "email": get_email_provider().name != "mock",   # true once SMTP is set
         "online_payments": gateway_configured(),
     }

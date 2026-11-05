@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import { api, ApiError } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { api, me, ApiError, User } from "@/lib/api";
+
+type Availability = { phone: boolean; email: boolean; online_payments: boolean };
 
 export default function AccountPage() {
   const [current, setCurrent] = useState("");
@@ -9,6 +11,19 @@ export default function AccountPage() {
   const [confirm, setConfirm] = useState("");
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  // --- email verification ---
+  const [user, setUser] = useState<User | null>(null);
+  const [avail, setAvail] = useState<Availability | null>(null);
+  const [codeSent, setCodeSent] = useState(false);
+  const [code, setCode] = useState("");
+  const [vBusy, setVBusy] = useState(false);
+  const [vNotice, setVNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  useEffect(() => {
+    me().then(setUser).catch(() => {});
+    api<Availability>("/api/verify/availability").then(setAvail).catch(() => {});
+  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -36,16 +51,109 @@ export default function AccountPage() {
     } finally { setSaving(false); }
   }
 
+  async function sendCode() {
+    setVBusy(true); setVNotice(null);
+    try {
+      const r = await api<{ sent: boolean; note: string }>("/api/verify/request", {
+        method: "POST", body: JSON.stringify({ channel: "email" }),
+      });
+      setCodeSent(true);
+      setVNotice({ kind: "ok", text: r.note });
+    } catch (e) {
+      setVNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not send the code." });
+    } finally { setVBusy(false); }
+  }
+
+  async function confirmCode() {
+    if (!code.trim()) return;
+    setVBusy(true); setVNotice(null);
+    try {
+      await api("/api/verify/confirm", {
+        method: "POST", body: JSON.stringify({ channel: "email", code: code.trim() }),
+      });
+      setVNotice({ kind: "ok", text: "Email verified. Thank you." });
+      setCodeSent(false); setCode("");
+      setUser((u) => (u ? { ...u, email_verified: true } : u));
+    } catch (e) {
+      setVNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not verify the code." });
+    } finally { setVBusy(false); }
+  }
+
   return (
     <div className="space-y-5 max-w-md">
       <header>
         <h1 className="text-2xl font-semibold">Account</h1>
         <p className="text-sm text-ink-soft mt-1">
-          Change your password — do this after your first sign-in with a temporary password.
+          Verify your email and change your password.
         </p>
       </header>
 
+      {/* ---- email verification ---- */}
+      {user && (
+        <section className="rounded-lg border border-line bg-card p-4 space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium">Email address</p>
+              <p className="text-sm text-ink-soft break-all">{user.email}</p>
+            </div>
+            {user.email_verified ? (
+              <span className="shrink-0 inline-flex items-center gap-1.5 rounded-full bg-ledger/10 text-ledger px-3 py-1 text-xs font-medium">
+                <span className="h-1.5 w-1.5 rounded-full bg-ledger" /> Verified
+              </span>
+            ) : (
+              <span className="shrink-0 inline-flex items-center gap-1.5 rounded-full bg-brass/15 text-brass-ink px-3 py-1 text-xs font-medium">
+                <span className="h-1.5 w-1.5 rounded-full bg-brass" /> Not verified
+              </span>
+            )}
+          </div>
+
+          {!user.email_verified && avail && !avail.email && (
+            <p className="text-xs text-ink-soft border border-dashed border-line rounded-md p-3">
+              Email verification isn&apos;t switched on yet. It becomes available once
+              your school connects an email service. If this address is wrong, ask
+              your school admin to correct it.
+            </p>
+          )}
+
+          {!user.email_verified && avail && avail.email && (
+            <div className="space-y-3">
+              {!codeSent ? (
+                <button onClick={sendCode} disabled={vBusy}
+                        className="rounded-md bg-ink text-white px-4 py-2 text-sm font-medium hover:bg-ink-soft disabled:opacity-50">
+                  {vBusy ? "Sending…" : "Send verification code"}
+                </button>
+              ) : (
+                <div className="flex flex-wrap items-end gap-2">
+                  <label className="block">
+                    <span className="block text-xs text-ink-soft mb-1">6-digit code from your email</span>
+                    <input inputMode="numeric" value={code} maxLength={6}
+                           onChange={(e) => setCode(e.target.value)}
+                           className="w-32 rounded border border-line px-3 py-2 text-sm tracking-widest text-center" />
+                  </label>
+                  <button onClick={confirmCode} disabled={vBusy || !code.trim()}
+                          className="rounded-md bg-ink text-white px-4 py-2 text-sm font-medium hover:bg-ink-soft disabled:opacity-50">
+                    {vBusy ? "Checking…" : "Verify"}
+                  </button>
+                  <button onClick={sendCode} disabled={vBusy}
+                          className="text-sm text-ink-soft underline underline-offset-2">
+                    Resend
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {vNotice && (
+            <p role="status" className={`text-sm ${vNotice.kind === "ok" ? "text-ledger" : "text-sanction"}`}>
+              {vNotice.text}
+            </p>
+          )}
+        </section>
+      )}
+
+      {/* ---- change password ---- */}
       <form onSubmit={submit} className="rounded-lg border border-line bg-card p-4 space-y-3">
+        <p className="text-sm font-medium">Change password</p>
         <label className="block">
           <span className="block text-xs text-ink-soft mb-1">Current password</span>
           <input type="password" required value={current} autoComplete="current-password"

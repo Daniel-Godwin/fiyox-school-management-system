@@ -6,6 +6,10 @@ server (safe for dev, tests, and demos). Set TERMII_API_KEY (+ optional
 TERMII_SENDER_ID) and the same code path transmits real SMS via Termii.
 Every message, real or mock, lands in message_logs.
 """
+import asyncio
+import smtplib
+from email.message import EmailMessage
+
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -93,6 +97,83 @@ async def send_sms_and_log(db: AsyncSession, *, school_id: str, to: str,
     status, ref, error = await provider.send_sms(to, body)
     log = MessageLog(
         school_id=school_id, channel=Channel.SMS, recipient=to,
+        recipient_user_id=recipient_user_id, body=body, purpose=purpose,
+        related_id=related_id, status=status, provider=provider.name,
+        provider_ref=ref, error=error, created_by=created_by)
+    db.add(log)
+    return log
+
+
+# ---------- email ----------
+
+class MockEmailProvider:
+    name = "mock"
+
+    async def send_email(self, to: str, subject: str, body: str) -> tuple[MessageStatus, str | None, str | None]:
+        return MessageStatus.MOCK, None, None
+
+
+class SmtpEmailProvider:
+    name = "smtp"
+
+    def __init__(self, host: str, port: int, user: str | None, password: str | None,
+                 sender: str, sender_name: str):
+        self.host = host
+        self.port = port
+        self.user = user
+        self.password = password
+        self.sender = sender
+        self.sender_name = sender_name
+
+    def _send_blocking(self, to: str, subject: str, body: str) -> None:
+        msg = EmailMessage()
+        msg["Subject"] = subject
+        msg["From"] = f"{self.sender_name} <{self.sender}>"
+        msg["To"] = to
+        msg.set_content(body)
+        # STARTTLS on 587 (Gmail, most providers); implicit SSL on 465
+        if self.port == 465:
+            with smtplib.SMTP_SSL(self.host, self.port, timeout=20) as s:
+                if self.user:
+                    s.login(self.user, self.password or "")
+                s.send_message(msg)
+        else:
+            with smtplib.SMTP(self.host, self.port, timeout=20) as s:
+                s.starttls()
+                if self.user:
+                    s.login(self.user, self.password or "")
+                s.send_message(msg)
+
+    async def send_email(self, to: str, subject: str, body: str) -> tuple[MessageStatus, str | None, str | None]:
+        try:
+            # smtplib is blocking — keep it off the event loop
+            await asyncio.to_thread(self._send_blocking, to, subject, body)
+            return MessageStatus.SENT, None, None
+        except Exception as e:  # a mail failure must never crash the request
+            return MessageStatus.FAILED, None, str(e)[:300]
+
+
+def get_email_provider():
+    host = (settings.SMTP_HOST or "").strip()
+    if host:
+        sender = (settings.SMTP_FROM or settings.SMTP_USER or "").strip()
+        return SmtpEmailProvider(
+            host=host, port=settings.SMTP_PORT,
+            user=(settings.SMTP_USER or "").strip() or None,
+            password=settings.SMTP_PASSWORD,
+            sender=sender, sender_name=settings.SMTP_FROM_NAME or "Fiyox")
+    return MockEmailProvider()
+
+
+async def send_email_and_log(db: AsyncSession, *, school_id: str, to: str,
+                             subject: str, body: str, purpose: MessagePurpose,
+                             recipient_user_id: str | None = None,
+                             related_id: str | None = None,
+                             created_by: str | None = None) -> MessageLog:
+    provider = get_email_provider()
+    status, ref, error = await provider.send_email(to, subject, body)
+    log = MessageLog(
+        school_id=school_id, channel=Channel.EMAIL, recipient=to,
         recipient_user_id=recipient_user_id, body=body, purpose=purpose,
         related_id=related_id, status=status, provider=provider.name,
         provider_ref=ref, error=error, created_by=created_by)

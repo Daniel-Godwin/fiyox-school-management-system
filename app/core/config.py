@@ -38,6 +38,19 @@ class Settings(BaseSettings):
     # cheaper, but skips DND numbers and MTN blocks it overnight (8pm-8am).
     TERMII_CHANNEL: str = "dnd"
 
+    # Email (SMTP). With no SMTP_HOST the MockEmailProvider is used — messages
+    # are logged but nothing leaves the server (safe for dev/tests/demos). Set
+    # the four SMTP_* values and the same path sends real mail.
+    # Gmail pilot: SMTP_HOST=smtp.gmail.com, SMTP_PORT=587,
+    #   SMTP_USER=<you>@gmail.com, SMTP_PASSWORD=<16-char Google app password>.
+    # SMTP_FROM defaults to SMTP_USER; SMTP_FROM_NAME is the display name.
+    SMTP_HOST: str | None = None
+    SMTP_PORT: int = 587
+    SMTP_USER: str | None = None
+    SMTP_PASSWORD: str | None = None
+    SMTP_FROM: str | None = None
+    SMTP_FROM_NAME: str = "Fiyox"
+
     @field_validator("DATABASE_URL")
     @classmethod
     def _normalize_db_url(cls, v: str) -> str:
