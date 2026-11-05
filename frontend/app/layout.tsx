@@ -1,10 +1,17 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import ServiceWorkerRegister from "./sw-register";
 
 export const metadata: Metadata = {
   title: "Fiyox — School Management",
   description:
     "Multi-tenant school management for Nigerian secondary schools: results, fees, attendance, and parent communication.",
+  applicationName: "Fiyox",
+  appleWebApp: { capable: true, statusBarStyle: "default", title: "Fiyox" },
+  icons: {
+    icon: "/icon-192.png",
+    apple: "/apple-touch-icon.png",
+  },
 };
 
 // Without this, every phone renders the desktop layout shrunk to unreadable.
@@ -13,6 +20,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   // allow pinch-zoom (accessibility) but start at natural size
   maximumScale: 5,
+  themeColor: "#0b1f3a",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -30,7 +38,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       {/* suppressHydrationWarning: browser extensions (password managers etc.)
           inject attributes into the DOM before React hydrates; this silences
           that attribute-level noise only — real content mismatches still warn. */}
-      <body className="antialiased" suppressHydrationWarning>{children}</body>
+      <body className="antialiased" suppressHydrationWarning>
+        <ServiceWorkerRegister />
+        {children}
+      </body>
     </html>
   );
 }
