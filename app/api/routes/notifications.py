@@ -117,10 +117,12 @@ async def notification_status(
     'messages pretended', which is exactly the sort of thing you discover on the
     day fees are due.
     """
-    from app.services.notify import get_provider
+    from app.services.notify import get_provider, get_email_provider
     from app.services.paystack import gateway_configured
     provider = get_provider()
     live = provider.name != "mock"
+    email_provider = get_email_provider()
+    email_live = email_provider.name != "mock"
     return {
         "sms": {
             "provider": provider.name,
@@ -130,6 +132,16 @@ async def notification_status(
                         "SMS is in preview mode: messages are composed and logged, "
                         "but not delivered. Set TERMII_API_KEY to go live."),
             "sender_id": settings.TERMII_SENDER_ID if live else None,
+        },
+        "email": {
+            "provider": email_provider.name,
+            "live": email_live,
+            "message": (f"Email is being delivered via SMTP ({settings.SMTP_HOST})."
+                        if email_live else
+                        "Email is in preview mode: codes are composed and logged, "
+                        "but not delivered. Set SMTP_HOST and the SMTP_* values to "
+                        "go live."),
+            "sender": (settings.SMTP_FROM or settings.SMTP_USER) if email_live else None,
         },
         "online_payments": {
             "live": gateway_configured(),
