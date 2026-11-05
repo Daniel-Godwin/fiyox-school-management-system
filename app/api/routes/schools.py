@@ -99,6 +99,7 @@ class SchoolSettingsIn(BaseModel):
     withhold_results_on_debt: bool | None = None
     result_approval_required: bool | None = None
     affective_traits: list[str] | None = None
+    psychomotor_traits: list[str] | None = None
     online_payments_enabled: bool | None = None
     admission_prefix: str | None = Field(None, max_length=12)
     admission_pad: int | None = Field(None, ge=2, le=6)
@@ -131,6 +132,7 @@ async def my_school(
         "withhold_results_on_debt": school.withhold_results_on_debt,
         "result_approval_required": school.result_approval_required,
         "affective_traits": school.affective_traits or [],
+        "psychomotor_traits": school.psychomotor_traits or [],
         "online_payments_enabled": school.online_payments_enabled,
         "admission_prefix": school.admission_prefix,
         "admission_pad": school.admission_pad,
@@ -175,6 +177,7 @@ async def update_my_school(
         "withhold_results_on_debt": school.withhold_results_on_debt,
         "result_approval_required": school.result_approval_required,
         "affective_traits": school.affective_traits or [],
+        "psychomotor_traits": school.psychomotor_traits or [],
         "online_payments_enabled": school.online_payments_enabled,
         "updated": list(changes.keys()),
     }

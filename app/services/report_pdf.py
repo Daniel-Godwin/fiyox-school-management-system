@@ -251,18 +251,27 @@ def build_report_pdf(data: dict) -> bytes:
             story.append(prow)
         story.append(Spacer(1, 8))
 
-    # behaviour & character — inline badges rather than a table
-    aff = data.get("affective") or {}
-    if aff:
-        story.append(Paragraph("<b>Behaviour &amp; character</b>", small))
+    # behaviour & skills — inline badges rather than tables
+    badge = ParagraphStyle("badge", parent=small, leading=17)
+
+    def _rating_row(title: str, ratings: dict) -> None:
+        if not ratings:
+            return
+        story.append(Paragraph(f"<b>{title}</b>", small))
         story.append(Spacer(1, 3))
         chips = "&nbsp;&nbsp;".join(
             f'<font backColor="#E7EAF0">&nbsp;{escape(str(k))}&nbsp;'
             f'<b>{escape(str(v))}</b>&nbsp;</font>'
-            for k, v in aff.items())
-        badge = ParagraphStyle("badge", parent=small, leading=17)
+            for k, v in ratings.items())
         story.append(Paragraph(chips, badge))
-        story.append(Spacer(1, 8))
+        story.append(Spacer(1, 7))
+
+    aff = data.get("affective") or {}
+    psy = data.get("psychomotor") or {}
+    _rating_row("Affective traits (character)", aff)
+    _rating_row("Psychomotor skills", psy)
+    if aff or psy:
+        story.append(Spacer(1, 2))
 
     # comments
     comments = data.get("comments") or {}
@@ -297,9 +306,9 @@ def build_report_pdf(data: dict) -> bytes:
             f"<b>{escape(g['grade'])}</b> {g['min']}-{g['max']} {escape(g['remark'])}"
             for g in gk)
         story.append(Paragraph(f"<b>Grading key:</b> {parts}", legend))
-        if aff:
+        if aff or psy:
             story.append(Paragraph(
-                "<b>Behaviour key:</b> 5 Excellent &nbsp;&middot;&nbsp; 4 Very Good "
+                "<b>Rating key:</b> 5 Excellent &nbsp;&middot;&nbsp; 4 Very Good "
                 "&nbsp;&middot;&nbsp; 3 Good &nbsp;&middot;&nbsp; 2 Fair &nbsp;&middot;&nbsp; 1 Poor",
                 legend))
         story.append(Spacer(1, 8))

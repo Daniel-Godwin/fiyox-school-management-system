@@ -671,6 +671,67 @@ async def save_affective_grid(
     return {"saved": saved}
 
 
+@router.get("/results/psychomotor", tags=["results"])
+async def get_psychomotor_grid(
+    db: DbDep, user: Annotated[User, Depends(require_roles(
+        Role.TEACHER, Role.SCHOOL_ADMIN))],
+    arm_id: str = Query(...), term_id: str = Query(...),
+):
+    """The school's psychomotor skill list plus each student's current ratings."""
+    from app.models.school import School
+    school_id = tenant_scope(user)
+    school = await db.get(School, school_id)
+    traits = (school.psychomotor_traits or []) if school else []
+
+    results = await _arm_term_results(db, school_id, arm_id, term_id)
+    students = {s.id: s for s in (await db.execute(select(Student).where(
+        Student.school_id == school_id))).scalars().all()}
+    rows = []
+    for tr in results:
+        st = students.get(tr.student_id)
+        rows.append({
+            "student_id": tr.student_id,
+            "admission_number": st.admission_number if st else "",
+            "name": f"{st.first_name} {st.last_name}" if st else "",
+            "ratings": tr.psychomotor or {},
+        })
+    rows.sort(key=lambda r: r["name"])
+    return {"traits": traits, "students": rows}
+
+
+@router.post("/results/psychomotor", tags=["results"])
+async def save_psychomotor_grid(
+    payload: AffectiveGridIn, request: Request, db: DbDep,
+    user: Annotated[User, Depends(require_roles(Role.TEACHER, Role.SCHOOL_ADMIN))],
+):
+    """Save psychomotor ratings for a whole arm (1-5; unknown skills dropped)."""
+    from app.models.school import School
+    school_id = tenant_scope(user)
+    school = await db.get(School, school_id)
+    traits = set((school.psychomotor_traits or []) if school else [])
+
+    results = {tr.student_id: tr for tr in
+               await _arm_term_results(db, school_id, payload.arm_id, payload.term_id)}
+    saved = 0
+    for sid, ratings in payload.ratings.items():
+        tr = results.get(sid)
+        if not tr:
+            continue
+        clean = {}
+        for trait, val in ratings.items():
+            if trait in traits and isinstance(val, int) and 1 <= val <= 5:
+                clean[trait] = val
+        tr.psychomotor = clean
+        tr.updated_by = user.id
+        saved += 1
+    await record_audit(db, school_id=school_id, user_id=user.id, action="update",
+                       table_name="term_results", record_id=payload.arm_id,
+                       changes={"psychomotor_rated": {"old": None, "new": saved}},
+                       ip_address=request.client.host if request.client else None)
+    await db.commit()
+    return {"saved": saved}
+
+
 @router.get("/results/approval-queue", tags=["results"])
 async def results_approval_queue(
     db: DbDep,

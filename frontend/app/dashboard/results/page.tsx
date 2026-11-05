@@ -38,6 +38,7 @@ export default function ResultsPage() {
   const [draft, setDraft] = useState({ teacher: "", principal: "" });
   const [suggestions, setSuggestions] = useState<{ teacher: string[]; principal: string[] }>({ teacher: [], principal: [] });
   const [gridOpen, setGridOpen] = useState(false);
+  const [gridKind, setGridKind] = useState<"affective" | "psychomotor">("affective");
   const [gridTraits, setGridTraits] = useState<string[]>([]);
   const [gridRows, setGridRows] = useState<{ student_id: string; admission_number: string; name: string; ratings: Record<string, number> }[]>([]);
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
@@ -155,19 +156,21 @@ export default function ResultsPage() {
     }
   }
 
-  async function openGrid() {
-    setBusy("grid-load"); setNotice(null);
+  async function openGrid(kind: "affective" | "psychomotor") {
+    setBusy(kind === "affective" ? "grid-load" : "grid-load-psy"); setNotice(null);
     try {
       const g = await api<{ traits: string[]; students: typeof gridRows }>(
-        `/api/results/affective?arm_id=${armId}&term_id=${termId}`);
+        `/api/results/${kind}?arm_id=${armId}&term_id=${termId}`);
+      setGridKind(kind);
       setGridTraits(g.traits);
       setGridRows(g.students);
       setGridOpen(true);
       if (g.traits.length === 0) {
-        setNotice({ kind: "err", text: "No behaviour traits set up yet — add them under School setup." });
+        const what = kind === "affective" ? "character traits" : "psychomotor skills";
+        setNotice({ kind: "err", text: `No ${what} set up yet — add them under School setup.` });
       }
     } catch {
-      setNotice({ kind: "err", text: "Could not load the behaviour grid." });
+      setNotice({ kind: "err", text: "Could not load the ratings grid." });
     } finally { setBusy(null); }
   }
 
@@ -185,9 +188,10 @@ export default function ResultsPage() {
     try {
       const ratings: Record<string, Record<string, number>> = {};
       for (const r of gridRows) ratings[r.student_id] = r.ratings;
-      const res = await api<{ saved: number }>("/api/results/affective", {
+      const res = await api<{ saved: number }>(`/api/results/${gridKind}`, {
         method: "POST", body: JSON.stringify({ arm_id: armId, term_id: termId, ratings }) });
-      setNotice({ kind: "ok", text: `Behaviour ratings saved for ${res.saved} student${res.saved === 1 ? "" : "s"}.` });
+      const what = gridKind === "affective" ? "Character" : "Skill";
+      setNotice({ kind: "ok", text: `${what} ratings saved for ${res.saved} student${res.saved === 1 ? "" : "s"}.` });
       setGridOpen(false);
     } catch {
       setNotice({ kind: "err", text: "Could not save the ratings." });
@@ -302,9 +306,15 @@ export default function ResultsPage() {
             )}
 
             {hasRows && (
-              <button onClick={openGrid} disabled={busy !== null}
+              <button onClick={() => openGrid("affective")} disabled={busy !== null}
                       className="rounded-md border border-ink text-ink px-4 py-2 text-sm font-medium hover:bg-ink hover:text-white disabled:opacity-40">
-                {busy === "grid-load" ? "Loading…" : "Rate behaviour"}
+                {busy === "grid-load" ? "Loading…" : "Rate character"}
+              </button>
+            )}
+            {hasRows && (
+              <button onClick={() => openGrid("psychomotor")} disabled={busy !== null}
+                      className="rounded-md border border-ink text-ink px-4 py-2 text-sm font-medium hover:bg-ink hover:text-white disabled:opacity-40">
+                {busy === "grid-load-psy" ? "Loading…" : "Rate skills"}
               </button>
             )}
 
@@ -355,7 +365,7 @@ export default function ResultsPage() {
           {gridOpen && gridTraits.length > 0 && (
             <section className="rounded-lg border border-brass bg-brass/5 p-4 space-y-3">
               <div className="flex items-baseline justify-between gap-2">
-                <p className="text-sm font-medium">Behaviour ratings (1–5)</p>
+                <p className="text-sm font-medium">{gridKind === "affective" ? "Character ratings (1–5)" : "Skill ratings (1–5)"}</p>
                 <button onClick={() => setGridOpen(false)}
                         className="text-xs text-ink-soft underline underline-offset-2">Close</button>
               </div>

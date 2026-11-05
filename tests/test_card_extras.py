@@ -34,6 +34,35 @@ async def _session_with_next_class(ids):
     return out
 
 
+async def test_psychomotor_ratings_flow(ctx):
+    client, ids = ctx
+    h = await headers(client, "admin@gss-ikeja.ng", "admin123")
+    # configure the school's psychomotor skills
+    await client.patch("/api/schools/me", headers=h,
+                       json={"psychomotor_traits": ["Handwriting", "Sports"]})
+    # computed term results give the rows the grid writes onto
+    await _enter(client, h, ids, ids["term_id"], ids["student_ids"][0], (8, 8, 8, 56))
+    await client.post("/api/results/compute", headers=h,
+                      json={"arm_id": ids["arm_id"], "term_id": ids["term_id"]})
+
+    grid = (await client.get("/api/results/psychomotor", headers=h, params={
+        "arm_id": ids["arm_id"], "term_id": ids["term_id"]})).json()
+    assert grid["traits"] == ["Handwriting", "Sports"]
+
+    sid = ids["student_ids"][0]
+    r = await client.post("/api/results/psychomotor", headers=h, json={
+        "arm_id": ids["arm_id"], "term_id": ids["term_id"],
+        "ratings": {sid: {"Handwriting": 5, "Sports": 4, "NotAKnownSkill": 3}}})
+    assert r.status_code == 200 and r.json()["saved"] == 1
+
+    # the report carries psychomotor separately from affective; unknown skill dropped
+    rep = (await client.get(f"/api/report/{sid}", headers=h,
+                            params={"term_id": ids["term_id"]})).json()
+    assert rep["psychomotor"] == {"Handwriting": 5, "Sports": 4}
+    # affective is untouched and independent
+    assert rep["affective"] == {}
+
+
 async def test_report_carries_grading_key(ctx):
     client, ids = ctx
     h = await headers(client, "admin@gss-ikeja.ng", "admin123")

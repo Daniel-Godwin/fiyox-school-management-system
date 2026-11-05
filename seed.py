@@ -31,7 +31,11 @@ async def main():
 
         school = School(name="Government Secondary School, Ikeja",
                         slug="gss-ikeja", state="Lagos",
-                        address="12 School Road, Ikeja", primary_color="#0B4F6C")
+                        address="12 School Road, Ikeja", primary_color="#0B4F6C",
+                        affective_traits=["Punctuality", "Neatness", "Honesty",
+                                          "Attentiveness", "Teamwork"],
+                        psychomotor_traits=["Handwriting", "Sports", "Drawing",
+                                            "Handling tools"])
         db.add(school)
         await db.flush()
 

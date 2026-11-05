@@ -83,8 +83,10 @@ class TermResult(Base, UUIDMixin, TimestampMixin, TenantMixin):
     # the arm's mean average this term — lets the report card say where the
     # student stands relative to the class, and drives comment generation
     class_average: Mapped[float] = mapped_column(Float, default=0.0)
-    # affective/psychomotor domain, e.g. {"Punctuality": "A", "Neatness": "B"}
+    # affective (character) ratings 1-5, e.g. {"Punctuality": 5, "Neatness": 4}
     affective: Mapped[dict] = mapped_column(JSON, default=dict)
+    # psychomotor (skills) ratings 1-5, e.g. {"Handwriting": 4, "Sports": 5}
+    psychomotor: Mapped[dict] = mapped_column(JSON, default=dict)
     # generated on compute; set comments_edited when a human overrides them, so
     # recomputing the term never destroys what a teacher actually wrote
     form_teacher_comment: Mapped[str] = mapped_column(String(500), default="")

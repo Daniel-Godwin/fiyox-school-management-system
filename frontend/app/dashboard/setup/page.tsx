@@ -19,6 +19,7 @@ type SchoolSettings = {
   result_approval_required: boolean;
   online_payments_enabled: boolean;
   affective_traits: string[];
+  psychomotor_traits: string[];
   admission_prefix: string | null;
   admission_pad: number;
   admission_number_preview: string;
@@ -40,6 +41,7 @@ export default function SetupPage() {
   const [admPrefix, setAdmPrefix] = useState("");
   const [admPad, setAdmPad] = useState(3);
   const [newTrait, setNewTrait] = useState("");
+  const [newPsy, setNewPsy] = useState("");
   const [bank, setBank] = useState<CommentBankEntry[]>([]);
   const [newComment, setNewComment] = useState<{ text: string; min: string; max: string; audience: "form_teacher" | "principal" }>(
     { text: "", min: "0", max: "100", audience: "form_teacher" });
@@ -249,6 +251,29 @@ export default function SetupPage() {
   function removeTrait(t: string) {
     if (!school) return;
     saveTraits(school.affective_traits.filter((x) => x !== t));
+  }
+
+  async function savePsy(next: string[]) {
+    setBusy("psy");
+    try {
+      await api("/api/schools/me", { method: "PATCH",
+        body: JSON.stringify({ psychomotor_traits: next }) });
+      await load();
+    } catch { toast.err("Could not save the skills."); }
+    finally { setBusy(null); }
+  }
+  function addPsy() {
+    const t = newPsy.trim();
+    if (!t || !school) return;
+    if (school.psychomotor_traits.some((x) => x.toLowerCase() === t.toLowerCase())) {
+      toast.err("That skill is already in the list."); return;
+    }
+    setNewPsy("");
+    savePsy([...school.psychomotor_traits, t]);
+  }
+  function removePsy(t: string) {
+    if (!school) return;
+    savePsy(school.psychomotor_traits.filter((x) => x !== t));
   }
 
   async function addComment() {
@@ -712,14 +737,14 @@ export default function SetupPage() {
         </section>
       )}
 
-      {/* behaviour (affective) traits */}
+      {/* affective (character) traits */}
       {school && (
         <section className="rounded-lg border border-line bg-card p-4">
-          <p className="text-sm font-medium mb-1">Behaviour traits (report card)</p>
+          <p className="text-sm font-medium mb-1">Affective traits — character (report card)</p>
           <p className="text-xs text-ink-soft mb-3">
-            The behaviour and skill traits your school rates on the report card,
-            each scored 1–5 (e.g. Punctuality, Neatness, Handwriting). Form
-            teachers rate a whole class at once from the Results page.
+            Character traits your school rates 1–5 on the report card (e.g.
+            Punctuality, Neatness, Honesty). Form teachers rate a whole class at
+            once from the Results page.
           </p>
           <div className="flex flex-wrap gap-1.5 mb-3">
             {school.affective_traits.length === 0 ? (
@@ -741,6 +766,40 @@ export default function SetupPage() {
             <button onClick={addTrait} disabled={busy !== null || !newTrait.trim()}
                     className="rounded-md border border-ink text-ink px-3 py-1.5 text-sm font-medium hover:bg-ink hover:text-white disabled:opacity-40">
               {busy === "traits" ? "Saving…" : "Add trait"}
+            </button>
+          </div>
+        </section>
+      )}
+
+      {/* psychomotor skills */}
+      {school && (
+        <section className="rounded-lg border border-line bg-card p-4">
+          <p className="text-sm font-medium mb-1">Psychomotor skills (report card)</p>
+          <p className="text-xs text-ink-soft mb-3">
+            Practical skills your school rates 1–5 on the report card (e.g.
+            Handwriting, Sports, Drawing, Handling tools). These print as a
+            separate row from the character traits.
+          </p>
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {school.psychomotor_traits.length === 0 ? (
+              <span className="text-xs text-ink-soft">None yet — add your first skill below.</span>
+            ) : school.psychomotor_traits.map((t) => (
+              <span key={t} className="inline-flex items-center gap-1.5 rounded-full border border-line bg-paper px-3 py-1 text-xs">
+                {t}
+                <button onClick={() => removePsy(t)} disabled={busy !== null}
+                        aria-label={`Remove ${t}`}
+                        className="text-ink-soft hover:text-sanction disabled:opacity-40">×</button>
+              </span>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <input value={newPsy} placeholder="e.g. Handwriting"
+                   onChange={(e) => setNewPsy(e.target.value)}
+                   onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addPsy(); } }}
+                   className="rounded border border-line px-2 py-1.5 text-sm" />
+            <button onClick={addPsy} disabled={busy !== null || !newPsy.trim()}
+                    className="rounded-md border border-ink text-ink px-3 py-1.5 text-sm font-medium hover:bg-ink hover:text-white disabled:opacity-40">
+              {busy === "psy" ? "Saving…" : "Add skill"}
             </button>
           </div>
         </section>
