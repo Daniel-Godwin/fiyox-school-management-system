@@ -251,51 +251,56 @@ def build_report_pdf(data: dict) -> bytes:
             story.append(prow)
         story.append(Spacer(1, 8))
 
-    # behaviour & skills — inline badges rather than tables
+    # behaviour & skills — affective and psychomotor side by side
     badge = ParagraphStyle("badge", parent=small, leading=17)
 
-    def _rating_row(title: str, ratings: dict) -> None:
-        if not ratings:
-            return
-        story.append(Paragraph(f"<b>{title}</b>", small))
-        story.append(Spacer(1, 3))
+    def _rating_cell(title: str, ratings: dict):
         chips = "&nbsp;&nbsp;".join(
             f'<font backColor="#E7EAF0">&nbsp;{escape(str(k))}&nbsp;'
             f'<b>{escape(str(v))}</b>&nbsp;</font>'
             for k, v in ratings.items())
-        story.append(Paragraph(chips, badge))
-        story.append(Spacer(1, 7))
+        inner = Table([[Paragraph(f"<b>{title}</b>", small)],
+                       [Paragraph(chips, badge)]], colWidths=[89 * mm])
+        inner.setStyle(TableStyle([
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (0, 0), 4),
+            ("BOTTOMPADDING", (0, 1), (0, 1), 0),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("VALIGN", (0, 0), (-1, -1), "TOP")]))
+        return inner
 
     aff = data.get("affective") or {}
     psy = data.get("psychomotor") or {}
-    _rating_row("Affective traits (character)", aff)
-    _rating_row("Psychomotor skills", psy)
-    if aff or psy:
-        story.append(Spacer(1, 2))
+    if aff and psy:
+        both = Table([[_rating_cell("Affective traits (character)", aff),
+                       _rating_cell("Psychomotor skills", psy)]],
+                     colWidths=[91 * mm, 91 * mm])
+        both.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (0, 0), 0),
+            ("LEFTPADDING", (1, 0), (1, 0), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0)]))
+        story.append(both)
+        story.append(Spacer(1, 9))
+    elif aff:
+        story.append(_rating_cell("Affective traits (character)", aff))
+        story.append(Spacer(1, 9))
+    elif psy:
+        story.append(_rating_cell("Psychomotor skills", psy))
+        story.append(Spacer(1, 9))
 
-    # comments
+    # comments — plain, no surrounding box
     comments = data.get("comments") or {}
     ft = comments.get("form_teacher") or "-"
     pc = comments.get("principal") or "-"
-    crows = [
-        [Paragraph("<b>Form teacher's comment</b>", small)],
-        [Paragraph(ft, cmt)],
-        [Paragraph("<b>Principal's comment</b>", small)],
-        [Paragraph(pc, cmt)],
-    ]
-    ctab = Table(crows, colWidths=[182 * mm])
-    ctab.setStyle(TableStyle([
-        ("BOX", (0, 0), (-1, -1), 0.6, brand),
-        ("BACKGROUND", (0, 0), (0, 0), colors.HexColor("#E7EAF0")),
-        ("BACKGROUND", (0, 2), (0, 2), colors.HexColor("#E7EAF0")),
-        ("LINEBELOW", (0, 1), (0, 1), 0.25, colors.grey),
-        ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-        ("LEFTPADDING", (0, 0), (-1, -1), 6),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-    ]))
-    story.append(ctab)
-    story.append(Spacer(1, 8))
+    story.append(Paragraph("<b>Form teacher's comment:</b>", small))
+    story.append(Paragraph(ft, cmt))
+    story.append(Spacer(1, 5))
+    story.append(Paragraph("<b>Principal's comment:</b>", small))
+    story.append(Paragraph(pc, cmt))
+    story.append(Spacer(1, 10))
 
     # grading key — the scale parents read the grades against
     gk = data.get("grading_key") or []
@@ -330,17 +335,7 @@ def build_report_pdf(data: dict) -> bytes:
     ]))
 
     stamp_cell = stamp if stamp else Paragraph("", small)
-    # a line for the parent/guardian to sign, acknowledging they saw the result
-    parent_block = Table([[Spacer(1, 14 * mm)],
-                          [Paragraph("_" * 30, small)],
-                          [Paragraph("<b>Parent / Guardian</b><br/>Signature &amp; date", small)]],
-                         colWidths=[62 * mm])
-    parent_block.setStyle(TableStyle([
-        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-        ("TOPPADDING", (0, 0), (-1, -1), 0),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
-    ]))
-    foot = Table([[sig_block, stamp_cell, parent_block]], colWidths=[70 * mm, 50 * mm, 62 * mm])
+    foot = Table([[sig_block, stamp_cell]], colWidths=[120 * mm, 62 * mm])
     foot.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
         ("ALIGN", (1, 0), (1, 0), "CENTER"),
