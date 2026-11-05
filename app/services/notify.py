@@ -153,7 +153,45 @@ class SmtpEmailProvider:
             return MessageStatus.FAILED, None, str(e)[:300]
 
 
+class ResendEmailProvider:
+    """Sends over Resend's HTTPS API (port 443). Unlike SMTP, this works on
+    hosts like Render that block outbound SMTP ports."""
+    name = "resend"
+
+    def __init__(self, api_key: str, sender: str):
+        self.api_key = api_key
+        self.sender = sender  # "Name <addr>" or a bare address
+
+    async def send_email(self, to: str, subject: str, body: str) -> tuple[MessageStatus, str | None, str | None]:
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                r = await client.post(
+                    "https://api.resend.com/emails",
+                    headers={"Authorization": f"Bearer {self.api_key}"},
+                    json={"from": self.sender, "to": [to],
+                          "subject": subject, "text": body},
+                )
+            if r.status_code // 100 == 2:
+                ref = None
+                try:
+                    ref = r.json().get("id")
+                except Exception:
+                    pass
+                return MessageStatus.SENT, ref, None
+            # surface Resend's own explanation (e.g. domain not verified)
+            return MessageStatus.FAILED, None, f"HTTP {r.status_code}: {r.text[:260]}"
+        except Exception as e:
+            return MessageStatus.FAILED, None, str(e)[:300]
+
+
 def get_email_provider():
+    # prefer Resend (HTTPS API — works where SMTP ports are blocked)
+    key = (settings.RESEND_API_KEY or "").strip()
+    if key:
+        name = settings.SMTP_FROM_NAME or "Fiyox"
+        addr = (settings.RESEND_FROM or "onboarding@resend.dev").strip()
+        sender = addr if "<" in addr else f"{name} <{addr}>"
+        return ResendEmailProvider(api_key=key, sender=sender)
     host = (settings.SMTP_HOST or "").strip()
     if host:
         sender = (settings.SMTP_FROM or settings.SMTP_USER or "").strip()

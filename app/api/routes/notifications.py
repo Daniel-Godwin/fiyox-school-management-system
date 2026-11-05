@@ -136,12 +136,13 @@ async def notification_status(
         "email": {
             "provider": email_provider.name,
             "live": email_live,
-            "message": (f"Email is being delivered via SMTP ({settings.SMTP_HOST})."
+            "message": (f"Email is being delivered via {email_provider.name}."
                         if email_live else
                         "Email is in preview mode: codes are composed and logged, "
-                        "but not delivered. Set SMTP_HOST and the SMTP_* values to "
-                        "go live."),
-            "sender": (settings.SMTP_FROM or settings.SMTP_USER) if email_live else None,
+                        "but not delivered. Set RESEND_API_KEY (recommended) or the "
+                        "SMTP_* values to go live."),
+            "sender": (settings.RESEND_FROM if email_provider.name == "resend"
+                       else (settings.SMTP_FROM or settings.SMTP_USER)) if email_live else None,
         },
         "online_payments": {
             "live": gateway_configured(),

@@ -51,6 +51,14 @@ class Settings(BaseSettings):
     SMTP_FROM: str | None = None
     SMTP_FROM_NAME: str = "Fiyox"
 
+    # Resend (HTTPS email API). Preferred over SMTP because it works on hosts
+    # that block outbound SMTP ports (e.g. Render). Set RESEND_API_KEY to go
+    # live. RESEND_FROM defaults to Resend's shared sender, which (with no
+    # verified domain) delivers only to the Resend account owner's address;
+    # set it to an address on your verified domain to send to anyone.
+    RESEND_API_KEY: str | None = None
+    RESEND_FROM: str = "onboarding@resend.dev"
+
     # Verification-code rate limits (per contact, per hour). Email is cheap, so
     # it gets a higher ceiling than SMS. Raise these for a pilot where staff are
     # testing repeatedly; keep them modest in production to deter abuse.
