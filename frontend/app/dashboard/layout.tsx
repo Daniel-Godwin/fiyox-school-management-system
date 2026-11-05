@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { me, clearToken, getToken, ROLE_LABEL, User } from "@/lib/api";
 import { ToastProvider } from "@/components/Toast";
+import SyncStatus from "@/components/SyncStatus";
 
 const NAV: { href: string; label: string; roles: User["role"][] }[] = [
   { href: "/dashboard", label: "Overview",
@@ -102,7 +103,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <div className="min-h-screen md:grid md:grid-cols-[230px_1fr]">
       {/* ---- phone/tablet top bar ---- */}
       <header className="md:hidden sticky top-0 z-40 flex items-center justify-between bg-ink text-white px-4 py-3">
-        <img src="/fiyox-logo-white.png" alt="Fiyox" style={{ height: 26, width: "auto" }} />
+        <div className="flex items-center gap-3">
+          <img src="/fiyox-logo-white.png" alt="Fiyox" style={{ height: 26, width: "auto" }} />
+          <SyncStatus />
+        </div>
         <button
           onClick={() => setMenuOpen((o) => !o)}
           aria-label={menuOpen ? "Close menu" : "Open menu"}
@@ -142,6 +146,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <aside className="hidden md:flex bg-ink text-white flex-col py-6">
         <div className="px-5 mb-8">
           <img src="/fiyox-logo-white.png" alt="Fiyox" style={{ height: 34, width: "auto" }} />
+          <div className="mt-3"><SyncStatus /></div>
         </div>
         <nav className="flex flex-col gap-1 px-3">{navLinks}</nav>
         <div className="mt-auto px-5 pt-6">

@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api } from "@/lib/api";
+import { ApiError } from "@/lib/api";
+import { cachedGet, queuedPost, putCache } from "@/lib/offline/offlineApi";
 
 type Term = { id: string; name: string; session: string; is_current: boolean };
 type Arm = { id: string; label: string };
@@ -38,23 +39,23 @@ export default function ScoreEntryPage() {
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
-  // load selectors once
+  // load selectors once (served from the offline cache when there's no network)
   useEffect(() => {
     Promise.all([
-      api<Me>("/api/auth/me"),
-      api<Term[]>("/api/academics/terms"),
-      api<Arm[]>("/api/academics/arms"),
-      api<Subject[]>("/api/academics/subjects"),
-      api<Assignment[]>("/api/users/assignments"),
+      cachedGet<Me>("/api/auth/me"),
+      cachedGet<Term[]>("/api/academics/terms"),
+      cachedGet<Arm[]>("/api/academics/arms"),
+      cachedGet<Subject[]>("/api/academics/subjects"),
+      cachedGet<Assignment[]>("/api/users/assignments"),
     ]).then(([u, t, a, s, asg]) => {
-      setMe(u);
-      setTerms(t);
-      setArms(a);
-      setSubjects(s);
-      setAssignments(asg);
-      const current = t.find((x) => x.is_current);
+      setMe(u.data);
+      setTerms(t.data);
+      setArms(a.data);
+      setSubjects(s.data);
+      setAssignments(asg.data);
+      const current = t.data.find((x) => x.is_current);
       if (current) setTermId(current.id);
-    }).catch(() => setNotice({ kind: "err", text: "Could not load class lists. Is the backend running?" }));
+    }).catch(() => setNotice({ kind: "err", text: "Could not load class lists. Open this page once while online so it can be used offline later." }));
   }, []);
 
   const isTeacher = me?.role === "teacher";
@@ -75,23 +76,27 @@ export default function ScoreEntryPage() {
     if (!ready) return;
     setLoading(true);
     setNotice(null);
+    const scoresPath = `/api/scores?arm_id=${armId}&subject_id=${subjectId}&term_id=${termId}`;
     try {
       const [comps, allStudents, existing] = await Promise.all([
-        api<Component[]>("/api/assessment-components"),
-        api<Student[]>("/api/students"),
-        api<ScoreCell[]>(`/api/scores?arm_id=${armId}&subject_id=${subjectId}&term_id=${termId}`),
+        cachedGet<Component[]>("/api/assessment-components"),
+        cachedGet<Student[]>("/api/students"),
+        cachedGet<ScoreCell[]>(scoresPath),
       ]);
-      setComponents([...comps].sort((a, b) => a.sequence - b.sequence));
+      setComponents([...comps.data].sort((a, b) => a.sequence - b.sequence));
       setStudents(
-        allStudents
+        allStudents.data
           .filter((s) => s.current_arm_id === armId)
           .sort((a, b) => a.admission_number.localeCompare(b.admission_number)),
       );
       const filled: Record<string, string> = {};
-      for (const c of existing) filled[k(c.student_id, c.component_id)] = String(c.score);
+      for (const c of existing.data) filled[k(c.student_id, c.component_id)] = String(c.score);
       setCells(filled);
+      if (comps.stale || allStudents.stale || existing.stale) {
+        setNotice({ kind: "ok", text: "You're offline — showing the last saved copy. Scores you enter will sync automatically." });
+      }
     } catch {
-      setNotice({ kind: "err", text: "Could not load the score sheet. Try again." });
+      setNotice({ kind: "err", text: "Could not load the score sheet. Open it once while online to use it offline." });
     } finally {
       setLoading(false);
     }
@@ -145,13 +150,29 @@ export default function ScoreEntryPage() {
         setNotice({ kind: "err", text: "Nothing to save yet — enter at least one score." });
         return;
       }
-      const res = await api<{ scores_written: number }>("/api/scores", {
-        method: "POST",
-        body: JSON.stringify({ subject_id: subjectId, arm_id: armId, term_id: termId, rows }),
-      });
-      setNotice({ kind: "ok", text: `Saved ${res.scores_written} score${res.scores_written === 1 ? "" : "s"}.` });
-    } catch {
-      setNotice({ kind: "err", text: "Save failed. Check your connection and try again." });
+      const label = `Scores — ${arms.find((a) => a.id === armId)?.label ?? "class"}, ${subjects.find((s) => s.id === subjectId)?.name ?? "subject"}`;
+      const r = await queuedPost<{ scores_written: number }>(
+        "/api/scores",
+        { subject_id: subjectId, arm_id: armId, term_id: termId, rows },
+        label,
+      );
+      if (r.queued) {
+        // keep the entered values in the offline cache so reopening shows them
+        const cache: ScoreCell[] = [];
+        for (const s of students) for (const c of components) {
+          const raw = cells[k(s.id, c.id)];
+          if (raw !== undefined && raw.trim() !== "" && !isInvalid(c.id, raw)) {
+            cache.push({ student_id: s.id, component_id: c.id, score: Number(raw) });
+          }
+        }
+        void putCache(`/api/scores?arm_id=${armId}&subject_id=${subjectId}&term_id=${termId}`, cache);
+        setNotice({ kind: "ok", text: "Saved on this device — it will sync automatically when you're back online." });
+      } else {
+        const n = r.result?.scores_written ?? 0;
+        setNotice({ kind: "ok", text: `Saved ${n} score${n === 1 ? "" : "s"}.` });
+      }
+    } catch (e) {
+      setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Save failed. Check your connection and try again." });
     } finally {
       setSaving(false);
     }
