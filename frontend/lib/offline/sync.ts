@@ -3,9 +3,16 @@
  * Writes are idempotent on the server (score/attendance upserts keyed by their
  * natural keys), so replaying a queued op twice is harmless — which makes retry
  * safe. Each op also carries an X-Op-Id for future server-side de-duplication.
+ *
+ * Replay happens three ways, so nothing is lost: immediately when online, on the
+ * browser "online" event, and — even with no tab open — via the service worker's
+ * Background Sync, which reads the token/apiBase mirrored into the meta store.
  */
-import { fdb, type OutboxOp } from "./db";
-import { api, ApiError } from "../api";
+import { fdb, getMeta, setMeta, type OutboxOp } from "./db";
+import { api, ApiError, getToken } from "../api";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const SYNC_TAG = "fiyox-outbox";
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
@@ -27,6 +34,30 @@ export async function pendingOps(): Promise<OutboxOp[]> {
   return (await fdb()).getAllFromIndex("outbox", "by-created");
 }
 
+/** Remove a single queued op (used by the Pending-changes screen). */
+export async function discard(id: string): Promise<void> {
+  await (await fdb()).delete("outbox", id);
+  emit();
+}
+
+/** Mirror the current credentials so the service worker can replay with no tab. */
+async function mirrorCreds(): Promise<void> {
+  const token = getToken();
+  if (token) await setMeta("token", token);
+  await setMeta("apiBase", API_BASE);
+}
+
+/** Ask the browser to drain the outbox in the background when it next can. */
+async function requestBackgroundSync(): Promise<void> {
+  try {
+    if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+    const reg = await navigator.serviceWorker.ready;
+    // SyncManager is not in every browser; guard it.
+    const sm = (reg as unknown as { sync?: { register(tag: string): Promise<void> } }).sync;
+    if (sm) await sm.register(SYNC_TAG);
+  } catch { /* background sync simply unavailable — the online-event flush covers it */ }
+}
+
 export async function enqueue(path: string, body: unknown, label: string): Promise<void> {
   const op: OutboxOp = {
     id: (crypto as Crypto).randomUUID(),
@@ -34,8 +65,10 @@ export async function enqueue(path: string, body: unknown, label: string): Promi
     createdAt: Date.now(), tries: 0,
   };
   await (await fdb()).put("outbox", op);
+  await mirrorCreds();
   emit();
   void flush();
+  void requestBackgroundSync();
 }
 
 let flushing = false;
@@ -78,4 +111,10 @@ export async function flush(): Promise<{ sent: number; pending: number; blocked:
 if (typeof window !== "undefined") {
   window.addEventListener("online", () => { void flush(); emit(); });
   window.addEventListener("offline", () => { emit(); });
+  // the service worker tells us when it drained the queue in the background
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.addEventListener("message", (e: MessageEvent) => {
+      if (e.data && e.data.type === "fiyox-synced") emit();
+    });
+  }
 }

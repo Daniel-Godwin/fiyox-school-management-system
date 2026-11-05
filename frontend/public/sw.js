@@ -5,7 +5,8 @@
  * - Static assets (Next build output, images, fonts): stale-while-revalidate.
  * - API calls (/api/*) are never cached — data must always be live.
  */
-const VERSION = "fiyox-v1";
+const VERSION = "fiyox-v2";
+const SYNC_TAG = "fiyox-outbox";
 const PRECACHE = [
   "/offline.html",
   "/icon-192.png",
@@ -68,4 +69,77 @@ self.addEventListener("fetch", (event) => {
       })
     );
   }
+});
+
+/* ---- Background Sync: drain the write outbox even with no tab open ----
+ *
+ * The app mirrors the auth token and API base into the "meta" store when it
+ * queues a write, so the worker can replay queued POSTs here. Writes are
+ * idempotent on the server, so a replay that the app also sent is harmless.
+ */
+function openFiyoxDB() {
+  return new Promise((resolve, reject) => {
+    // no version → open whatever the app already created; never triggers upgrade
+    const r = indexedDB.open("fiyox");
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+}
+
+function idbReq(req) {
+  return new Promise((resolve, reject) => {
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function drainOutbox() {
+  let db;
+  try { db = await openFiyoxDB(); } catch { return; }
+  if (!db.objectStoreNames.contains("outbox") || !db.objectStoreNames.contains("meta")) return;
+
+  const meta = db.transaction("meta", "readonly").objectStore("meta");
+  const token = await idbReq(meta.get("token")).catch(() => undefined);
+  const apiBase = await idbReq(meta.get("apiBase")).catch(() => undefined);
+  if (!apiBase) return;
+
+  const ops = await idbReq(db.transaction("outbox", "readonly").objectStore("outbox").getAll())
+    .catch(() => []);
+  ops.sort((a, b) => a.createdAt - b.createdAt);
+
+  let synced = 0;
+  for (const op of ops) {
+    try {
+      const headers = { "Content-Type": "application/json", "X-Op-Id": op.id };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const res = await fetch(`${apiBase}${op.path}`, { method: op.method, body: op.body, headers });
+      if (res.ok) {
+        await idbReq(db.transaction("outbox", "readwrite").objectStore("outbox").delete(op.id));
+        synced++;
+      } else if (res.status === 401) {
+        break;                       // token expired — leave the queue for the app to re-auth
+      } else {
+        op.tries = (op.tries || 0) + 1;
+        const store = db.transaction("outbox", "readwrite").objectStore("outbox");
+        if (op.tries >= 5) await idbReq(store.delete(op.id));
+        else await idbReq(store.put(op));
+      }
+    } catch {
+      throw new Error("offline");    // reject so the browser retries this sync later
+    }
+  }
+
+  if (synced > 0) {
+    const clients = await self.clients.matchAll({ includeUncontrolled: true });
+    for (const c of clients) c.postMessage({ type: "fiyox-synced", synced });
+  }
+}
+
+self.addEventListener("sync", (event) => {
+  if (event.tag === SYNC_TAG) event.waitUntil(drainOutbox());
+});
+
+// lets an open tab ask the worker to try a drain (e.g. a manual "Sync now")
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "fiyox-drain") event.waitUntil(drainOutbox());
 });
