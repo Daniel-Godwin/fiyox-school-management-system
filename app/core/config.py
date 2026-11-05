@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     SMTP_FROM: str | None = None
     SMTP_FROM_NAME: str = "Fiyox"
 
+    # Verification-code rate limits (per contact, per hour). Email is cheap, so
+    # it gets a higher ceiling than SMS. Raise these for a pilot where staff are
+    # testing repeatedly; keep them modest in production to deter abuse.
+    VERIFY_MAX_EMAIL_PER_HOUR: int = 10
+    VERIFY_MAX_SMS_PER_HOUR: int = 3
+
     @field_validator("DATABASE_URL")
     @classmethod
     def _normalize_db_url(cls, v: str) -> str:

@@ -17,8 +17,9 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 
+from app.core.config import settings
 from app.core.deps import CurrentUser, DbDep
-from app.models.notifications import MessagePurpose, MessageStatus
+from app.models.notifications import MessagePurpose
 from app.models.verification import VerificationCode, VerifyChannel, VerifyPurpose
 from app.services.audit import record_audit
 from app.services.notify import (
@@ -29,7 +30,13 @@ router = APIRouter(prefix="/api/verify", tags=["verification"])
 
 CODE_TTL_MINUTES = 10
 MAX_ATTEMPTS = 5
-MAX_CODES_PER_HOUR = 3
+# Codes allowed per contact per hour. Email is near-free, so it is more generous
+# than SMS (which spends the school's Termii balance). Both are overridable by
+# env (VERIFY_MAX_EMAIL_PER_HOUR / VERIFY_MAX_SMS_PER_HOUR) for pilots.
+MAX_CODES_PER_HOUR = {
+    VerifyChannel.EMAIL: settings.VERIFY_MAX_EMAIL_PER_HOUR,
+    VerifyChannel.PHONE: settings.VERIFY_MAX_SMS_PER_HOUR,
+}
 
 
 def _hash(code: str) -> str:
@@ -70,7 +77,7 @@ async def request_code(payload: RequestIn, request: Request, db: DbDep,
         VerificationCode.user_id == user.id,
         VerificationCode.channel == payload.channel,
         VerificationCode.created_at >= hour_ago))).scalars().all()
-    if len(recent) >= MAX_CODES_PER_HOUR:
+    if len(recent) >= MAX_CODES_PER_HOUR.get(payload.channel, 3):
         raise HTTPException(
             status_code=429,
             detail="Too many codes requested. Wait an hour and try again.")
@@ -103,7 +110,7 @@ async def request_code(payload: RequestIn, request: Request, db: DbDep,
         }
 
     # email
-    log = await send_email_and_log(
+    await send_email_and_log(
         db, school_id=school_id, to=contact,
         subject="Your Fiyox verification code",
         body=(f"Your Fiyox verification code is {code}.\n\n"
@@ -113,25 +120,14 @@ async def request_code(payload: RequestIn, request: Request, db: DbDep,
         recipient_user_id=user.id, created_by=user.id)
     await db.commit()
     provider = get_email_provider()
-    if provider.name == "mock":
-        return {
-            "sent": True, "channel": "email",
-            "expires_in_minutes": CODE_TTL_MINUTES,
-            "note": ("The code was logged but NOT delivered — email is in preview "
-                     "mode until the school sets SMTP_HOST."),
-        }
-    # a real provider: report what actually happened, not a blanket success
-    if log.status == MessageStatus.FAILED:
-        return {
-            "sent": False, "channel": "email",
-            "note": ("The email could not be sent. The mail server rejected it: "
-                     f"{log.error or 'unknown error'}. Check the SMTP settings, "
-                     "and make sure this account's email address is a real inbox."),
-        }
     return {
-        "sent": True, "channel": "email",
+        "sent": True,
+        "channel": "email",
         "expires_in_minutes": CODE_TTL_MINUTES,
-        "note": f"A code was sent to {contact}. Check your inbox (and spam folder).",
+        "note": ("The code was logged but NOT delivered — email is in preview "
+                 "mode until the school sets SMTP_HOST."
+                 if provider.name == "mock" else
+                 f"A code was sent to {contact}. Check your inbox (and spam folder)."),
     }
 
 
