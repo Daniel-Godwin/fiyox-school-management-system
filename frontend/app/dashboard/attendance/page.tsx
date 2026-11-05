@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { ApiError } from "@/lib/api";
+import { cachedGet, queuedPost, putCache } from "@/lib/offline/offlineApi";
 
 type Arm = { id: string; label: string };
 type Student = {
@@ -30,26 +31,30 @@ export default function AttendancePage() {
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   useEffect(() => {
-    api<Arm[]>("/api/academics/arms")
-      .then(setArms)
-      .catch(() => setNotice({ kind: "err", text: "Could not load classes. Is the backend running?" }));
+    cachedGet<Arm[]>("/api/academics/arms")
+      .then((a) => setArms(a.data))
+      .catch(() => setNotice({ kind: "err", text: "Could not load classes. Open this page once while online so it can be used offline later." }));
   }, []);
 
   const load = useCallback(async () => {
     if (!armId || !date) return;
     setNotice(null);
+    const registerPath = `/api/attendance/register?arm_id=${armId}&date=${date}`;
     try {
       const [all, register] = await Promise.all([
-        api<Student[]>("/api/students"),
-        api<RegisterRow[]>(`/api/attendance/register?arm_id=${armId}&date=${date}`),
+        cachedGet<Student[]>("/api/students"),
+        cachedGet<RegisterRow[]>(registerPath),
       ]);
       setStudents(
-        all.filter((s) => s.current_arm_id === armId)
+        all.data.filter((s) => s.current_arm_id === armId)
            .sort((a, b) => a.admission_number.localeCompare(b.admission_number)),
       );
-      setMarks(Object.fromEntries(register.map((r) => [r.student_id, r.status])));
+      setMarks(Object.fromEntries(register.data.map((r) => [r.student_id, r.status])));
+      if (all.stale || register.stale) {
+        setNotice({ kind: "ok", text: "You're offline — showing the last saved copy. Marks you take will sync automatically." });
+      }
     } catch {
-      setNotice({ kind: "err", text: "Could not load the register." });
+      setNotice({ kind: "err", text: "Could not load the register. Open it once while online to use it offline." });
     }
   }, [armId, date]);
 
@@ -69,17 +74,29 @@ export default function AttendancePage() {
     }
     setSaving(true); setNotice(null);
     try {
-      const res = await api<{ created: number; updated: number; unchanged: number }>(
+      const label = `Attendance — ${arms.find((a) => a.id === armId)?.label ?? "class"}, ${date}`;
+      const r = await queuedPost<{ created: number; updated: number; unchanged: number }>(
         "/api/attendance/mark",
-        { method: "POST", body: JSON.stringify({ arm_id: armId, date, records }) },
+        { arm_id: armId, date, records },
+        label,
       );
-      const parts = [];
-      if (res.created) parts.push(`${res.created} marked`);
-      if (res.updated) parts.push(`${res.updated} corrected`);
-      if (res.unchanged) parts.push(`${res.unchanged} unchanged`);
-      setNotice({ kind: "ok", text: `Register saved — ${parts.join(", ")}.` });
-    } catch {
-      setNotice({ kind: "err", text: "Save failed. Check your connection and try again." });
+      if (r.queued) {
+        // keep the marks in the offline cache so reopening this day shows them
+        void putCache(
+          `/api/attendance/register?arm_id=${armId}&date=${date}`,
+          records.map((rec) => ({ student_id: rec.student_id, status: rec.status })),
+        );
+        setNotice({ kind: "ok", text: "Saved on this device — it will sync automatically when you're back online." });
+      } else {
+        const res = r.result ?? { created: 0, updated: 0, unchanged: 0 };
+        const parts = [];
+        if (res.created) parts.push(`${res.created} marked`);
+        if (res.updated) parts.push(`${res.updated} corrected`);
+        if (res.unchanged) parts.push(`${res.unchanged} unchanged`);
+        setNotice({ kind: "ok", text: `Register saved — ${parts.join(", ")}.` });
+      }
+    } catch (e) {
+      setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Save failed. Check your connection and try again." });
     } finally { setSaving(false); }
   }
 
