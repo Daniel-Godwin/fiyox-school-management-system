@@ -251,45 +251,27 @@ def build_report_pdf(data: dict) -> bytes:
             story.append(prow)
         story.append(Spacer(1, 8))
 
-    # behaviour & skills — affective and psychomotor side by side
+    # behaviour & skills — full-width rows, one after the other
     badge = ParagraphStyle("badge", parent=small, leading=17)
 
-    def _rating_cell(title: str, ratings: dict):
+    def _rating_row(title: str, ratings: dict) -> None:
+        if not ratings:
+            return
+        story.append(Paragraph(f"<b>{title}</b>", small))
+        story.append(Spacer(1, 3))
         chips = "&nbsp;&nbsp;".join(
             f'<font backColor="#E7EAF0">&nbsp;{escape(str(k))}&nbsp;'
             f'<b>{escape(str(v))}</b>&nbsp;</font>'
             for k, v in ratings.items())
-        inner = Table([[Paragraph(f"<b>{title}</b>", small)],
-                       [Paragraph(chips, badge)]], colWidths=[89 * mm])
-        inner.setStyle(TableStyle([
-            ("TOPPADDING", (0, 0), (-1, -1), 0),
-            ("BOTTOMPADDING", (0, 0), (0, 0), 4),
-            ("BOTTOMPADDING", (0, 1), (0, 1), 0),
-            ("LEFTPADDING", (0, 0), (-1, -1), 0),
-            ("VALIGN", (0, 0), (-1, -1), "TOP")]))
-        return inner
+        story.append(Paragraph(chips, badge))
+        story.append(Spacer(1, 7))
 
     aff = data.get("affective") or {}
     psy = data.get("psychomotor") or {}
-    if aff and psy:
-        both = Table([[_rating_cell("Affective traits (character)", aff),
-                       _rating_cell("Psychomotor skills", psy)]],
-                     colWidths=[91 * mm, 91 * mm])
-        both.setStyle(TableStyle([
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("LEFTPADDING", (0, 0), (0, 0), 0),
-            ("LEFTPADDING", (1, 0), (1, 0), 6),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-            ("TOPPADDING", (0, 0), (-1, -1), 0),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 0)]))
-        story.append(both)
-        story.append(Spacer(1, 9))
-    elif aff:
-        story.append(_rating_cell("Affective traits (character)", aff))
-        story.append(Spacer(1, 9))
-    elif psy:
-        story.append(_rating_cell("Psychomotor skills", psy))
-        story.append(Spacer(1, 9))
+    _rating_row("Affective traits (character)", aff)
+    _rating_row("Psychomotor skills", psy)
+    if aff or psy:
+        story.append(Spacer(1, 2))
 
     # comments — plain, no surrounding box
     comments = data.get("comments") or {}
