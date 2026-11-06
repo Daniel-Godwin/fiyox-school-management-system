@@ -16,7 +16,7 @@ export default function LoginPage() {
     setError(null);
     setBusy(true);
     try {
-      await login(email, password);
+      await login(email.trim().toLowerCase(), password);
       router.replace("/dashboard");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not reach the server");
@@ -54,6 +54,10 @@ export default function LoginPage() {
               suppressHydrationWarning
               required
               autoComplete="email"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              inputMode="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm"

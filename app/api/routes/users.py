@@ -8,7 +8,7 @@ Everything is tenant-scoped and audited.
 import secrets
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import select
+from sqlalchemy import select, func
 from pydantic import BaseModel
 from app.core.deps import DbDep, require_roles, tenant_scope
 from app.core.security import hash_password
@@ -38,8 +38,11 @@ async def create_user(
         raise HTTPException(status_code=403,
                             detail="Principal accounts are created by the platform owner")
 
+    # normalise so logins (which are case-insensitive) always match, and so a
+    # duplicate check can't be fooled by casing/whitespace
+    email = payload.email.strip().lower()
     exists = (await db.execute(select(User).where(
-        User.school_id == school_id, User.email == payload.email))).scalars().first()
+        User.school_id == school_id, func.lower(User.email) == email))).scalars().first()
     if exists:
         raise HTTPException(status_code=409, detail="A user with this email already exists")
 
@@ -50,7 +53,7 @@ async def create_user(
         raw_password = temp_password
 
     user = User(
-        school_id=school_id, email=payload.email,
+        school_id=school_id, email=email,
         hashed_password=hash_password(raw_password),
         role=payload.role, first_name=payload.first_name,
         last_name=payload.last_name, phone=payload.phone)
@@ -76,7 +79,7 @@ async def create_user(
 
     await record_audit(db, school_id=school_id, user_id=admin.id, action="create",
                        table_name="users", record_id=user.id,
-                       changes={"email": {"old": None, "new": payload.email},
+                       changes={"email": {"old": None, "new": email},
                                 "role": {"old": None, "new": payload.role}},
                        ip_address=ip)
     await db.commit()

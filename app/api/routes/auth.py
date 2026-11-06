@@ -2,7 +2,7 @@
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy import select
+from sqlalchemy import select, func
 from app.core.deps import DbDep, CurrentUser
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models.school import User, Role
@@ -15,7 +15,10 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 async def login(form: Annotated[OAuth2PasswordRequestForm, Depends()], db: DbDep):
     # OAuth2 form uses 'username'; we treat it as email. School is resolved from
     # the user record itself for MVP (subdomain routing comes with the frontend).
-    result = await db.execute(select(User).where(User.email == form.username))
+    # email is matched case-insensitively and trimmed: phone keyboards capitalise
+    # the first letter and may add a trailing space, which must not block login
+    email = form.username.strip().lower()
+    result = await db.execute(select(User).where(func.lower(User.email) == email))
     user = result.scalars().first()
     if not user or not verify_password(form.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Incorrect email or password")

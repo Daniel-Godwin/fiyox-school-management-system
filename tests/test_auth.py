@@ -8,6 +8,16 @@ async def test_login_success(ctx):
     assert token
 
 
+async def test_login_is_case_insensitive_and_trims(ctx):
+    # phone keyboards capitalise the first letter and can add a trailing space;
+    # none of that must block a correct login
+    client, _ = ctx
+    r = await client.post("/api/auth/login",
+                          data={"username": "  Admin@GSS-Ikeja.NG ", "password": "admin123"})
+    assert r.status_code == 200
+    assert r.json().get("access_token")
+
+
 async def test_login_wrong_password(ctx):
     client, _ = ctx
     r = await client.post("/api/auth/login",
