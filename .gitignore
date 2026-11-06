@@ -26,3 +26,7 @@ __pycache__/
 Thumbs.db
 .idea/
 .vscode/
+
+# Claude delivery artifacts (not part of the app)
+Claude outputs/
+*.zip
