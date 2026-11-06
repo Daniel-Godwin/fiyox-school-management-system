@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, getToken, ApiError } from "@/lib/api";
+import Reveal from "@/components/Reveal";
 
 const CONTACT_EMAIL = process.env.NEXT_PUBLIC_CONTACT_EMAIL ?? "";
 const CONTACT_PHONE = process.env.NEXT_PUBLIC_CONTACT_PHONE ?? "";
@@ -40,6 +41,24 @@ const FEATURES: { title: string; body: string; icon: React.ReactNode }[] = [
   },
 ];
 
+const TRUST: { title: string; body: string; icon: React.ReactNode }[] = [
+  {
+    title: "Built for Nigerian schools",
+    body: "Sessions, three terms, class arms, CA-and-exam grading and WAEC-style bands — the way your school already works, not a foreign template bent to fit.",
+    icon: (<path d="M12 3 2 8l10 5 10-5-10-5Zm0 10v6M6 10v5c0 1 2.7 2.5 6 2.5s6-1.5 6-2.5v-5" />),
+  },
+  {
+    title: "Every change is accountable",
+    body: "Who changed a score, who took a payment, and when — each action is logged. Accountability your proprietor can see.",
+    icon: (<path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 5v5l3 2" />),
+  },
+  {
+    title: "Works on the phones you have",
+    body: "Teachers, bursars and parents use it from an ordinary phone browser. Nothing to install.",
+    icon: (<path d="M7 2h10a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Zm4 17h2" />),
+  },
+];
+
 export default function Landing() {
   const [signedIn, setSignedIn] = useState(false);
   useEffect(() => { setSignedIn(!!getToken()); }, []);
@@ -47,14 +66,15 @@ export default function Landing() {
   return (
     <div className="min-h-screen bg-paper text-ink">
       {/* top bar */}
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-ink text-white">
-        <div className="mx-auto max-w-6xl flex items-center justify-between px-5 py-3">
-          <img src="/fiyox-logo-white.png" alt="Fiyox" style={{ height: "clamp(72px, 9vw, 120px)", width: "auto" }} />
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-ink/95 backdrop-blur text-white">
+        <div className="mx-auto max-w-6xl flex items-center justify-between px-5 py-2.5">
+          <img src="/fiyox-logo-white.png" alt="Fiyox"
+               style={{ height: "clamp(40px, 5vw, 56px)", width: "auto" }} />
           <nav className="flex items-center gap-5 text-sm">
-            <a href="#features" className="hidden sm:inline text-white/75 hover:text-white">What it does</a>
-            <a href="#demo" className="hidden sm:inline text-white/75 hover:text-white">Request a demo</a>
+            <a href="#features" className="hidden sm:inline text-white/75 hover:text-white transition-colors">What it does</a>
+            <a href="#demo" className="hidden sm:inline text-white/75 hover:text-white transition-colors">Request a demo</a>
             <Link href={signedIn ? "/dashboard" : "/login"}
-                  className="rounded-md border border-brass/70 text-brass px-3 py-1.5 font-medium hover:bg-brass hover:text-ink transition-colors">
+                  className="rounded-md border border-brass/70 text-brass px-3.5 py-1.5 font-medium hover:bg-brass hover:text-ink transition-colors">
               {signedIn ? "Go to dashboard" : "Sign in"}
             </Link>
           </nav>
@@ -62,36 +82,45 @@ export default function Landing() {
       </header>
 
       {/* hero */}
-      <section className="bg-ink text-white">
-        <div className="mx-auto max-w-6xl grid lg:grid-cols-[1.05fr_0.95fr] gap-10 px-5 pt-14 pb-16 lg:pt-20 lg:pb-24 items-center">
+      <section className="relative bg-ink text-white overflow-hidden">
+        {/* drifting brand glows */}
+        <div aria-hidden className="pointer-events-none absolute inset-0">
+          <div className="fiyox-float absolute -top-24 -left-20 h-80 w-80 rounded-full bg-brass/20 blur-3xl" />
+          <div className="fiyox-float fiyox-float--2 absolute top-10 right-0 h-96 w-96 rounded-full bg-ledger/20 blur-3xl" />
+        </div>
+        <div className="relative mx-auto max-w-6xl grid lg:grid-cols-[1.05fr_0.95fr] gap-10 px-5 pt-14 pb-16 lg:pt-20 lg:pb-24 items-center">
           <div>
-            <h1 className="text-4xl sm:text-5xl font-extrabold leading-[1.08] tracking-tight">
+            <span className="fiyox-in fiyox-in-1 inline-block rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs tracking-wide text-brass">
+              School management for Nigerian secondary schools
+            </span>
+            <h1 className="fiyox-in fiyox-in-2 mt-5 text-4xl sm:text-5xl font-extrabold leading-[1.08] tracking-tight">
               The whole school, in one place your staff can actually run.
             </h1>
-            <p className="mt-5 text-base sm:text-lg text-white/80 max-w-xl leading-relaxed">
+            <p className="fiyox-in fiyox-in-3 mt-5 text-base sm:text-lg text-white/80 max-w-xl leading-relaxed">
               Fiyox keeps results, fees, attendance and parent communication together —
               built for the way Nigerian secondary schools really work, from continuous
               assessment to WAEC-style grades and term report cards.
             </p>
-            <div className="mt-8 flex flex-wrap gap-3">
+            <div className="fiyox-in fiyox-in-4 mt-8 flex flex-wrap gap-3">
               <a href="#demo"
-                 className="rounded-md bg-brass text-ink px-5 py-3 text-sm font-semibold hover:brightness-105">
+                 className="rounded-md bg-brass text-ink px-5 py-3 text-sm font-semibold shadow-lg shadow-brass/20 hover:brightness-105 hover:-translate-y-0.5 transition-all">
                 Request a demo
               </a>
               <Link href="/login"
-                    className="rounded-md border border-white/25 px-5 py-3 text-sm font-semibold text-white hover:bg-white/10">
+                    className="rounded-md border border-white/25 px-5 py-3 text-sm font-semibold text-white hover:bg-white/10 transition-colors">
                 Sign in
               </Link>
             </div>
-            <p className="mt-6 text-sm text-white/55">
+            <p className="fiyox-in fiyox-in-4 mt-6 text-sm text-white/55">
               Set up for your school, with staff trained live. Free to pilot for a term.
             </p>
           </div>
 
           {/* hero visual: the report card, the product's signature artifact */}
-          <div className="relative">
+          <div className="fiyox-in fiyox-in-4 relative">
             <div className="absolute -inset-3 rounded-2xl bg-brass/10 blur-xl" aria-hidden />
-            <div className="relative rounded-xl bg-white text-ink shadow-2xl ring-1 ring-black/5 overflow-hidden">
+            <div className="relative rounded-xl bg-white text-ink shadow-2xl ring-1 ring-black/5 overflow-hidden
+                            transition-transform duration-300 hover:-translate-y-1 hover:shadow-[0_30px_60px_-15px_rgba(0,0,0,0.4)]">
               <div className="bg-ink text-white px-5 py-3 flex items-center gap-3">
                 <span className="grid h-9 w-9 place-items-center rounded-full bg-brass text-ink font-bold">GS</span>
                 <div className="leading-tight">
@@ -141,20 +170,27 @@ export default function Landing() {
 
       {/* features */}
       <section id="features" className="mx-auto max-w-6xl px-5 py-16 lg:py-20">
-        <h2 className="text-2xl sm:text-3xl font-bold tracking-tight max-w-2xl">
-          Everything a term asks of your office, handled in one system.
-        </h2>
+        <Reveal>
+          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight max-w-2xl">
+            Everything a term asks of your office, handled in one system.
+          </h2>
+        </Reveal>
         <div className="mt-10 grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {FEATURES.map((f) => (
-            <div key={f.title} className="rounded-xl border border-line bg-card p-5">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"
-                   strokeLinecap="round" strokeLinejoin="round"
-                   className="h-7 w-7 text-brass">
-                {f.icon}
-              </svg>
-              <h3 className="mt-4 font-semibold">{f.title}</h3>
-              <p className="mt-1.5 text-sm text-ink-soft leading-relaxed">{f.body}</p>
-            </div>
+          {FEATURES.map((f, i) => (
+            <Reveal key={f.title} delay={(i % 3) * 80}>
+              <div className="group h-full rounded-xl border border-line bg-card p-5
+                              transition-all duration-200 hover:-translate-y-1 hover:shadow-lg hover:border-brass/40">
+                <span className="grid h-11 w-11 place-items-center rounded-lg bg-brass/10 text-brass
+                                 transition-colors group-hover:bg-brass group-hover:text-ink">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"
+                       strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6">
+                    {f.icon}
+                  </svg>
+                </span>
+                <h3 className="mt-4 font-semibold">{f.title}</h3>
+                <p className="mt-1.5 text-sm text-ink-soft leading-relaxed">{f.body}</p>
+              </div>
+            </Reveal>
           ))}
         </div>
       </section>
@@ -162,42 +198,48 @@ export default function Landing() {
       {/* trust band */}
       <section className="bg-ink text-white">
         <div className="mx-auto max-w-6xl px-5 py-14 grid sm:grid-cols-3 gap-8">
-          {[
-            ["Built for Nigerian schools", "Sessions, three terms, class arms, CA-and-exam grading and WAEC-style bands — the way your school already works, not a foreign template bent to fit."],
-            ["Every change is accountable", "Who changed a score, who took a payment, and when — each action is logged. Accountability your proprietor can see."],
-            ["Works on the phones you have", "Teachers, bursars and parents use it from an ordinary phone browser. Nothing to install."],
-          ].map(([t, b]) => (
-            <div key={t}>
-              <h3 className="font-semibold text-brass">{t}</h3>
-              <p className="mt-2 text-sm text-white/75 leading-relaxed">{b}</p>
-            </div>
+          {TRUST.map((t, i) => (
+            <Reveal key={t.title} delay={i * 90}>
+              <div>
+                <span className="grid h-11 w-11 place-items-center rounded-lg bg-brass/15 text-brass">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"
+                       strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6">
+                    {t.icon}
+                  </svg>
+                </span>
+                <h3 className="mt-4 font-semibold text-brass">{t.title}</h3>
+                <p className="mt-2 text-sm text-white/75 leading-relaxed">{t.body}</p>
+              </div>
+            </Reveal>
           ))}
         </div>
       </section>
 
       {/* request a demo */}
       <section id="demo" className="mx-auto max-w-6xl px-5 py-16 lg:py-20 grid lg:grid-cols-[0.9fr_1.1fr] gap-10 items-start">
-        <div>
-          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">See it with your own school in mind.</h2>
-          <p className="mt-4 text-ink-soft leading-relaxed max-w-md">
-            Tell us about your school and we will arrange a short walkthrough. There is
-            no cost and no obligation — the aim is simply to show you whether Fiyox would
-            make your term lighter.
-          </p>
-          {(CONTACT_EMAIL || CONTACT_PHONE) && (
-            <div className="mt-6 text-sm text-ink-soft space-y-1">
-              {CONTACT_PHONE && <p>Call or WhatsApp: <span className="text-ink font-medium">{CONTACT_PHONE}</span></p>}
-              {CONTACT_EMAIL && <p>Email: <span className="text-ink font-medium">{CONTACT_EMAIL}</span></p>}
-            </div>
-          )}
-        </div>
-        <DemoForm />
+        <Reveal>
+          <div>
+            <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">See it with your own school in mind.</h2>
+            <p className="mt-4 text-ink-soft leading-relaxed max-w-md">
+              Tell us about your school and we will arrange a short walkthrough. There is
+              no cost and no obligation — the aim is simply to show you whether Fiyox would
+              make your term lighter.
+            </p>
+            {(CONTACT_EMAIL || CONTACT_PHONE) && (
+              <div className="mt-6 text-sm text-ink-soft space-y-1">
+                {CONTACT_PHONE && <p>Call or WhatsApp: <span className="text-ink font-medium">{CONTACT_PHONE}</span></p>}
+                {CONTACT_EMAIL && <p>Email: <span className="text-ink font-medium">{CONTACT_EMAIL}</span></p>}
+              </div>
+            )}
+          </div>
+        </Reveal>
+        <Reveal delay={120}><DemoForm /></Reveal>
       </section>
 
       {/* footer */}
       <footer className="bg-ink text-white/70">
         <div className="mx-auto max-w-6xl px-5 py-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-sm">
-          <img src="/fiyox-logo-white.png" alt="Fiyox" style={{ height: 30, width: "auto" }} />
+          <img src="/fiyox-logo-white.png" alt="Fiyox" style={{ height: 34, width: "auto" }} />
           <span>School management for Nigerian secondary schools.</span>
           <Link href="/login" className="text-brass hover:underline">Sign in</Link>
         </div>
@@ -243,7 +285,7 @@ function DemoForm() {
   }
 
   return (
-    <form onSubmit={submit} className="rounded-xl border border-line bg-card p-5 sm:p-6 space-y-3">
+    <form onSubmit={submit} className="rounded-xl border border-line bg-card p-5 sm:p-6 space-y-3 shadow-sm">
       <div className="grid sm:grid-cols-2 gap-3">
         <Field label="School name" value={form.school_name} onChange={set("school_name")} placeholder="e.g. Government Secondary School" />
         <Field label="Your name" value={form.contact_name} onChange={set("contact_name")} placeholder="Principal / proprietor" />
@@ -251,14 +293,14 @@ function DemoForm() {
         <Field label="Phone (optional)" value={form.phone} onChange={set("phone")} placeholder="080…" />
       </div>
       <label className="block">
-        <span className="block text-xs font-medium text-ink-soft mb-1">Anything you'd like us to know (optional)</span>
+        <span className="block text-xs font-medium text-ink-soft mb-1">Anything you&apos;d like us to know (optional)</span>
         <textarea value={form.message} onChange={set("message")} rows={3}
-                  className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm"
+                  className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm focus:border-ledger outline-none"
                   placeholder="Number of students, when your term starts, questions…" />
       </label>
       {error && <p className="text-sm text-sanction">{error}</p>}
       <button type="submit" disabled={busy}
-              className="w-full rounded-md bg-ledger text-white px-4 py-3 text-sm font-semibold hover:brightness-110 disabled:opacity-50">
+              className="w-full rounded-md bg-ledger text-white px-4 py-3 text-sm font-semibold hover:brightness-110 disabled:opacity-50 transition-all">
         {busy ? "Sending…" : "Request a demo"}
       </button>
       <p className="text-xs text-ink-soft text-center">We use your details only to contact you about Fiyox.</p>
@@ -274,7 +316,8 @@ function Field({ label, value, onChange, placeholder, type = "text" }: {
     <label className="block">
       <span className="block text-xs font-medium text-ink-soft mb-1">{label}</span>
       <input type={type} value={value} onChange={onChange} placeholder={placeholder}
-             className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm" />
+             autoCapitalize={type === "email" ? "none" : undefined}
+             className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm focus:border-ledger outline-none" />
     </label>
   );
 }

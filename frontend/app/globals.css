@@ -179,10 +179,30 @@ button:disabled {
 }
 .fiyox-rise { animation: fiyox-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
 
+/* staggered hero entrance */
+@keyframes fiyox-rise-in {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fiyox-in { opacity: 0; animation: fiyox-rise-in 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+.fiyox-in-1 { animation-delay: 0.05s; }
+.fiyox-in-2 { animation-delay: 0.18s; }
+.fiyox-in-3 { animation-delay: 0.31s; }
+.fiyox-in-4 { animation-delay: 0.44s; }
+
+/* slow drifting glows behind the hero */
+@keyframes fiyox-float {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50%      { transform: translate(20px, -24px) scale(1.09); }
+}
+.fiyox-float { animation: fiyox-float 12s ease-in-out infinite; }
+.fiyox-float--2 { animation-duration: 16s; animation-delay: -5s; }
+
 @media (prefers-reduced-motion: reduce) {
   .fiyox-arc { animation-duration: 2.2s; animation-timing-function: linear; }
   .fiyox-breathe { animation: none; opacity: 1; }
-  .fiyox-rise { animation: none; }
+  .fiyox-rise, .fiyox-in { animation: none; opacity: 1; }
+  .fiyox-float { animation: none; }
 }
 
 /* toast entrance */
