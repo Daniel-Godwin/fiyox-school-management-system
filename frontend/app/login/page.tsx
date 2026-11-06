@@ -3,6 +3,7 @@
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { login, ApiError } from "@/lib/api";
+import FiyoxLoader from "@/components/FiyoxLoader";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -33,7 +34,7 @@ export default function LoginPage() {
           <p className="text-brass text-[11px] tracking-[0.25em] uppercase">
             School register
           </p>
-          <img src="/fiyox-logo-white.png" alt="Fiyox School Management System" className="mt-1" style={{ height: 50, width: "auto" }} />
+          <img src="/fiyox-logo-white.png" alt="Fiyox School Management System" className="mt-1" style={{ height: 64, width: "auto" }} />
           <p className="text-white/70 text-sm mt-1">
             Results · Fees · Attendance
           </p>
@@ -90,9 +91,9 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={busy}
-            className="w-full rounded-md bg-ink text-white py-2.5 text-sm font-medium hover:bg-ink-soft disabled:opacity-60"
+            className="w-full rounded-md bg-ink text-white py-2.5 text-sm font-medium hover:bg-ink-soft disabled:opacity-70 flex items-center justify-center gap-2 transition-colors"
           >
-            {busy ? "Signing in…" : "Sign in"}
+            {busy ? (<><FiyoxLoader size={18} tone="dark" /> Signing in…</>) : "Sign in"}
           </button>
         </form>
 

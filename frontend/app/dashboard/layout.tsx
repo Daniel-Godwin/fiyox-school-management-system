@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { me, clearToken, getToken, ROLE_LABEL, User } from "@/lib/api";
 import { ToastProvider } from "@/components/Toast";
 import SyncStatus from "@/components/SyncStatus";
+import FiyoxLoader from "@/components/FiyoxLoader";
 
 const NAV: { href: string; label: string; roles: User["role"][] }[] = [
   { href: "/dashboard", label: "Overview",
@@ -79,11 +80,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   useEffect(() => { setMenuOpen(false); }, [pathname]);
 
   if (!user) {
-    return (
-      <main className="min-h-screen grid place-items-center text-ink-soft text-sm">
-        Loading your workspace…
-      </main>
-    );
+    return <FiyoxLoader fullScreen label="Loading your workspace…" />;
   }
 
   const items = NAV.filter((n) => n.roles.includes(user.role));
@@ -108,7 +105,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       {/* ---- phone/tablet top bar ---- */}
       <header className="md:hidden sticky top-0 z-40 flex items-center justify-between bg-ink text-white px-4 py-3">
         <div className="flex items-center gap-3">
-          <img src="/fiyox-logo-white.png" alt="Fiyox" style={{ height: 26, width: "auto" }} />
+          <img src="/fiyox-logo-white.png" alt="Fiyox" style={{ height: 32, width: "auto" }} />
           <SyncStatus />
         </div>
         <button
@@ -149,7 +146,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       {/* ---- desktop sidebar ---- */}
       <aside className="hidden md:flex bg-ink text-white flex-col py-6">
         <div className="px-5 mb-8">
-          <img src="/fiyox-logo-white.png" alt="Fiyox" style={{ height: 34, width: "auto" }} />
+          <img src="/fiyox-logo-white.png" alt="Fiyox" style={{ height: 44, width: "auto" }} />
           <div className="mt-3"><SyncStatus /></div>
         </div>
         <nav className="flex flex-col gap-1 px-3">{navLinks}</nav>
