@@ -171,9 +171,18 @@ button:disabled {
   animation-direction: reverse;
 }
 .fiyox-breathe { animation: fiyox-breathe 2.1s ease-in-out infinite; }
+
+/* section entrance for the dashboards */
+@keyframes fiyox-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fiyox-rise { animation: fiyox-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
 @media (prefers-reduced-motion: reduce) {
   .fiyox-arc { animation-duration: 2.2s; animation-timing-function: linear; }
   .fiyox-breathe { animation: none; opacity: 1; }
+  .fiyox-rise { animation: none; }
 }
 
 /* toast entrance */
