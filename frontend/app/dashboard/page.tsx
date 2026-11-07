@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api, me, User } from "@/lib/api";
+import OwnerDashboard from "@/components/OwnerDashboard";
 
 type Student = { id: string };
 type Term = { id: string; name: string; session: string; is_current: boolean;
@@ -63,7 +64,10 @@ export default function Overview() {
   useEffect(() => {
     me().then((u) => {
       setUser(u);
-      const staff = ["super_admin", "school_admin", "teacher", "bursar"].includes(u.role);
+      // the platform owner gets a dedicated dashboard (OwnerDashboard) that does
+      // its own data loading, so skip the single-school staff fetches here
+      if (u.role === "super_admin") return;
+      const staff = ["school_admin", "teacher", "bursar"].includes(u.role);
 
       api<Term[]>("/api/academics/terms").then((ts) => {
         const cur = ts.find((t) => t.is_current) ?? ts[0] ?? null;
@@ -112,6 +116,8 @@ export default function Overview() {
       </div>
     );
   }
+
+  if (user.role === "super_admin") return <OwnerDashboard user={user} />;
 
   const staff = ["super_admin", "school_admin", "teacher", "bursar"].includes(user.role);
   const isAdmin = ["super_admin", "school_admin"].includes(user.role);
