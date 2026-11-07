@@ -1,7 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, ApiError, me, User } from "@/lib/api";
+import { Kpi, BRAND as C } from "@/components/Panels";
+
+// a stable, readable colour per subject so the grid is easy to scan
+const SUBJECT_COLORS = [
+  "#0b1f3a", "#1e7a4f", "#b7791f", "#2563eb", "#7c3aed",
+  "#0e7490", "#b4232a", "#c2410c", "#be185d", "#4d7c0f",
+];
+function subjectColor(id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return SUBJECT_COLORS[h % SUBJECT_COLORS.length];
+}
 
 type Period = {
   id: string; name: string; sequence: number;
@@ -134,6 +146,18 @@ export default function TimetablePage() {
   const cellAll = (day: string, periodId: string) =>
     (grid?.lessons ?? []).filter((l) => l.day === day && l.period_id === periodId);
 
+  const stats = useMemo(() => {
+    const g = grid;
+    if (!g) return null;
+    const teaching = g.periods.filter((p) => !p.is_break).length;
+    const slots = teaching * g.days.length;
+    const placed = g.lessons.length;
+    const subjects = new Set(g.lessons.map((l) => l.subject_id)).size;
+    const teachersSet = new Set(g.lessons.filter((l) => l.teacher_id).map((l) => l.teacher_id)).size;
+    return { placed, slots, open: Math.max(0, slots - placed), subjects, teachers: teachersSet,
+             fill: slots ? Math.round((placed / slots) * 100) : 0 };
+  }, [grid]);
+
   return (
     <div className="space-y-5">
       <header>
@@ -248,6 +272,19 @@ export default function TimetablePage() {
         </section>
       )}
 
+      {/* admin summary */}
+      {isAdmin && stats && grid && grid.periods.length > 0 && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 fiyox-rise">
+          <Kpi label="Lessons placed" value={stats.placed.toString()}
+               hint={`${stats.fill}% of the week filled`} accent={C.ink} />
+          <Kpi label="Open slots" value={stats.open.toString()}
+               hint="click a + to fill" accent={stats.open > 0 ? C.brass : C.ledger} />
+          <Kpi label="Subjects" value={stats.subjects.toString()}
+               hint="scheduled this week" accent={C.inkSoft} />
+          <Kpi label="Teachers assigned" value={stats.teachers.toString()} accent={C.ledger} />
+        </div>
+      )}
+
       {/* the grid */}
       {grid && grid.periods.length > 0 && (
         <div className="overflow-x-auto rounded-lg border border-line bg-card">
@@ -285,8 +322,10 @@ export default function TimetablePage() {
                         {here.length > 0 ? (
                           <div className="space-y-1">
                             {here.map((l) => (
-                          <div key={l.id} className="rounded border border-line bg-white px-2 py-1.5">
-                            <div className="font-medium">{l.subject_name}</div>
+                          <div key={l.id}
+                               className="rounded border border-line bg-white px-2 py-1.5 border-l-[3px] transition-shadow hover:shadow-sm"
+                               style={{ borderLeftColor: subjectColor(l.subject_id) }}>
+                            <div className="font-medium" style={{ color: subjectColor(l.subject_id) }}>{l.subject_name}</div>
                             {(isTeacher || (isFamily && !armId && multiWard)) && (
                               <div className="text-xs text-ink-soft">{l.arm_label}</div>
                             )}

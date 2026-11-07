@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError } from "@/lib/api";
 import { cachedGet, queuedPost, putCache } from "@/lib/offline/offlineApi";
+import { BRAND as C } from "@/components/Panels";
 
 type Arm = { id: string; label: string };
 type Student = {
@@ -102,6 +103,30 @@ export default function AttendancePage() {
 
   const marked = Object.keys(marks).length;
 
+  const summary = useMemo(() => {
+    const c: Record<Status, number> = { present: 0, absent: 0, late: 0, excused: 0 };
+    students.forEach((s) => { const m = marks[s.id]; if (m) c[m] += 1; });
+    const total = students.length || 1;
+    const seen = c.present + c.absent + c.late + c.excused;
+    return {
+      ...c, seen,
+      rate: seen ? Math.round((c.present / seen) * 100) : 0,
+      segs: [
+        { key: "present", color: C.ledger, pct: (c.present / total) * 100 },
+        { key: "late", color: C.brass, pct: (c.late / total) * 100 },
+        { key: "excused", color: C.ink, pct: (c.excused / total) * 100 },
+        { key: "absent", color: C.sanction, pct: (c.absent / total) * 100 },
+      ],
+    };
+  }, [students, marks]);
+
+  const chips: { label: string; key: Status; color: string }[] = [
+    { label: "Present", key: "present", color: C.ledger },
+    { label: "Absent", key: "absent", color: C.sanction },
+    { label: "Late", key: "late", color: C.brass },
+    { label: "Excused", key: "excused", color: C.ink },
+  ];
+
   return (
     <div className="space-y-5">
       <header>
@@ -153,6 +178,35 @@ export default function AttendancePage() {
 
       {students.length > 0 && (
         <>
+          {/* live register summary — updates as you mark */}
+          <div className="rounded-xl border border-line bg-card p-4 fiyox-rise">
+            <div className="flex items-center justify-between gap-3 mb-2.5">
+              <p className="text-xs uppercase tracking-wide text-ink-soft">Today&apos;s register</p>
+              <p className="text-sm">
+                <span className="display text-xl font-bold tabular"
+                      style={{ color: summary.seen === 0 ? C.inkSoft : summary.rate >= 90 ? C.ledger : summary.rate >= 75 ? C.brass : C.sanction }}>
+                  {summary.seen === 0 ? "—" : `${summary.rate}%`}
+                </span>
+                <span className="text-ink-soft"> present</span>
+              </p>
+            </div>
+            <div className="h-2.5 rounded-full bg-paper overflow-hidden flex">
+              {summary.segs.map((s) => s.pct > 0 && (
+                <span key={s.key} style={{ width: `${s.pct}%`, background: s.color, transition: "width .3s ease" }} />
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-3 text-xs">
+              {chips.map((ch) => (
+                <span key={ch.key} className="flex items-center gap-1.5">
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: ch.color }} />
+                  <span className="text-ink-soft">{ch.label}</span>
+                  <span className="tabular font-medium">{summary[ch.key]}</span>
+                </span>
+              ))}
+              <span className="ml-auto text-ink-soft">{summary.seen} of {students.length} marked</span>
+            </div>
+          </div>
+
           <div className="rounded-lg border border-line bg-card divide-y divide-line">
             {students.map((s) => (
               <div key={s.id}

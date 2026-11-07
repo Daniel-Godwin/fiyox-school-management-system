@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
 import { useToast } from "@/components/Toast";
+import { Kpi, BRAND as C } from "@/components/Panels";
 
 type Applicant = {
   id: string; application_number: string; name: string; gender: string;
@@ -150,6 +151,16 @@ export default function AdmissionsPage() {
 
   if (!data) return <div className="grid place-items-center py-20 text-ink-soft text-sm"><span className="spinner" /> Loading…</div>;
   const pending = data.pending ?? 0;
+  const cc = data.counts;
+  const admitted = cc.admitted ?? 0;
+  const admitRate = data.total ? Math.round((admitted / data.total) * 100) : 0;
+  const funnel = [
+    { label: "Applied", key: "applied", color: C.inkSoft },
+    { label: "Shortlisted", key: "shortlisted", color: C.brass },
+    { label: "Admitted", key: "admitted", color: C.ledger },
+    { label: "Not successful", key: "rejected", color: C.sanction },
+  ].map((f) => ({ ...f, value: cc[f.key] ?? 0 }));
+  const funnelTotal = funnel.reduce((s, f) => s + f.value, 0) || 1;
 
   return (
     <div className="max-w-4xl space-y-6">
@@ -163,6 +174,39 @@ export default function AdmissionsPage() {
           Entrance test
         </Link>
       </header>
+
+      {/* funnel summary */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 fiyox-rise">
+        <Kpi label="Applications" value={data.total.toLocaleString()} accent={C.ink} />
+        <Kpi label="Admitted" value={admitted.toLocaleString()}
+             hint={data.total ? `${admitRate}% of applicants` : undefined} accent={C.ledger} />
+        <Kpi label="Shortlisted" value={(cc.shortlisted ?? 0).toLocaleString()} accent={C.brass} />
+        <Kpi label="Awaiting approval" value={pending.toLocaleString()}
+             hint={pending > 0 ? "needs the principal" : "all clear"}
+             accent={pending > 0 ? C.brass : C.ledger} />
+      </div>
+
+      {/* pipeline bar */}
+      {funnelTotal > 1 && (
+        <div className="rounded-xl border border-line bg-card p-4 fiyox-rise">
+          <p className="text-xs uppercase tracking-wide text-ink-soft mb-2.5">Admissions pipeline</p>
+          <div className="h-2.5 rounded-full bg-paper overflow-hidden flex">
+            {funnel.map((f) => f.value > 0 && (
+              <span key={f.key} title={`${f.label}: ${f.value}`}
+                    style={{ width: `${(f.value / funnelTotal) * 100}%`, background: f.color }} />
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-3 text-xs">
+            {funnel.map((f) => (
+              <span key={f.key} className="flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-full" style={{ background: f.color }} />
+                <span className="text-ink-soft">{f.label}</span>
+                <span className="tabular font-medium">{f.value}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* shareable link */}
       {fullLink && (

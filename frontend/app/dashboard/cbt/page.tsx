@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api, me } from "@/lib/api";
+import { Kpi, BRAND as C } from "@/components/Panels";
 
 type Me = { role: string };
 
@@ -40,6 +41,23 @@ export default function CBTLanding() {
   const [exams, setExams] = useState<StaffExam[] | null>(null);
   const [avail, setAvail] = useState<AvailExam[] | null>(null);
 
+  const staffStats = useMemo(() => {
+    const e = exams ?? [];
+    return {
+      total: e.length,
+      published: e.filter((x) => x.status === "published").length,
+      drafts: e.filter((x) => x.status === "draft").length,
+      questions: e.reduce((s, x) => s + (x.question_count || 0), 0),
+    };
+  }, [exams]);
+
+  const studentStats = useMemo(() => {
+    const a = avail ?? [];
+    const done = a.filter((e) => e.last_status === "submitted" && !e.in_progress_attempt).length;
+    const openNow = a.filter((e) => e.can_start || e.in_progress_attempt).length;
+    return { total: a.length, done, openNow };
+  }, [avail]);
+
   useEffect(() => {
     me().then((u) => {
       setUser(u);
@@ -71,6 +89,15 @@ export default function CBTLanding() {
           </p>
         </header>
 
+        {avail && avail.length > 0 && (
+          <div className="grid grid-cols-3 gap-3 fiyox-rise">
+            <Kpi label="Ready to take" value={studentStats.openNow.toString()}
+                 accent={studentStats.openNow > 0 ? C.ledger : C.inkSoft} />
+            <Kpi label="Completed" value={studentStats.done.toString()} accent={C.ink} />
+            <Kpi label="Set for you" value={studentStats.total.toString()} accent={C.inkSoft} />
+          </div>
+        )}
+
         {avail === null ? (
           <p className="text-ink-soft text-sm"><span className="spinner" /> Loading…</p>
         ) : avail.length === 0 ? (
@@ -82,7 +109,7 @@ export default function CBTLanding() {
             {avail.map((e) => {
               const done = e.last_status === "submitted" && !e.in_progress_attempt;
               return (
-                <div key={e.id} className="bg-card border border-line rounded-xl p-5 card">
+                <div key={e.id} className="bg-card border border-line rounded-xl p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:border-brass/40">
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <h2 className="font-semibold">{e.title}</h2>
@@ -147,6 +174,18 @@ export default function CBTLanding() {
         )}
       </header>
 
+      {exams && exams.length > 0 && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 fiyox-rise">
+          <Kpi label="Total tests" value={staffStats.total.toString()} accent={C.ink} />
+          <Kpi label="Published" value={staffStats.published.toString()}
+               hint="live to students" accent={C.ledger} />
+          <Kpi label="Drafts" value={staffStats.drafts.toString()}
+               hint="not yet published" accent={C.brass} />
+          <Kpi label="Questions" value={staffStats.questions.toLocaleString()}
+               hint="across all tests" accent={C.inkSoft} />
+        </div>
+      )}
+
       {exams === null ? (
         <p className="text-ink-soft text-sm"><span className="spinner" /> Loading…</p>
       ) : exams.length === 0 ? (
@@ -168,7 +207,7 @@ export default function CBTLanding() {
             </thead>
             <tbody>
               {exams.map((e, i) => (
-                <tr key={e.id} className={i % 2 ? "bg-paper/50" : ""}>
+                <tr key={e.id} className={`${i % 2 ? "bg-paper/50" : ""} hover:bg-paper transition-colors`}>
                   <td className="px-4 py-3">
                     <div className="font-medium">{e.title}</div>
                     <div className="text-xs text-ink-soft">{e.subject_name ?? "—"} · {e.duration_minutes} min</div>
