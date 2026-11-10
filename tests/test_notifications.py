@@ -42,6 +42,34 @@ async def test_announcement_blast_hits_target_group_and_logs(ctx):
     assert log["recipient"] == "+2348010000001"
 
 
+async def test_admin_can_clear_delivery_logs(ctx):
+    client, ids = ctx
+    ah = await headers(client, "admin@gss-ikeja.ng", "admin123")
+    # generate a log entry via an announcement blast
+    ann = (await client.post("/api/announcements", headers=ah, json={
+        "title": "Notice", "message": "Hi", "target": "teachers", "publish": True})).json()
+    await client.post(f"/api/notifications/announcements/{ann['id']}/send", headers=ah)
+    assert len((await client.get("/api/notifications/logs", headers=ah)).json()) >= 1
+
+    cleared = (await client.request("DELETE", "/api/notifications/logs", headers=ah)).json()
+    assert cleared["deleted"] >= 1
+    assert (await client.get("/api/notifications/logs", headers=ah)).json() == []
+
+
+async def test_bursar_cannot_clear_delivery_logs(ctx):
+    client, ids = ctx
+    from app.models.school import User, Role
+    from app.core.security import hash_password
+    async with ids["session_factory"]() as db:
+        db.add(User(school_id=ids["school_id"], email="bursar2@x.ng",
+                    hashed_password=hash_password("burs1234"),
+                    role=Role.BURSAR, first_name="B", last_name="Ursar"))
+        await db.commit()
+    bh = await headers(client, "bursar2@x.ng", "burs1234")
+    r = await client.request("DELETE", "/api/notifications/logs", headers=bh)
+    assert r.status_code == 403
+
+
 async def test_fee_reminders_target_only_debtors(ctx):
     client, ids = ctx
     ah = await headers(client, "admin@gss-ikeja.ng", "admin123")

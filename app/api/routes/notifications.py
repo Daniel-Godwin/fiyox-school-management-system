@@ -6,16 +6,17 @@
   with an outstanding balance for a term.
 - GET  /api/notifications/logs — the delivery trail.
 """
+from datetime import datetime, timedelta
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from pydantic import BaseModel
 from app.core.config import settings
 from app.core.deps import DbDep, require_roles, tenant_scope
 from app.models.school import School, User, Role
 from app.models.communication import Announcement
 from app.models.fees import Invoice
-from app.models.notifications import MessageLog, MessagePurpose
+from app.models.notifications import MessageLog, MessagePurpose, MessageStatus
 from app.schemas import FeeReminderIn, MessageLogOut
 from app.services.fees import paid_total
 from app.services.notify import (
@@ -105,6 +106,29 @@ async def delivery_logs(
         stmt = stmt.where(MessageLog.purpose == purpose)
     stmt = stmt.order_by(MessageLog.created_at.desc()).limit(limit)
     return list((await db.execute(stmt)).scalars().all())
+
+
+@router.delete("/logs")
+async def clear_delivery_logs(
+    db: DbDep,
+    user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN))],
+    status: MessageStatus | None = Query(None, description="only clear logs with this status"),
+    older_than_days: int | None = Query(None, ge=1, description="only clear logs older than N days"),
+):
+    """Clear the delivery log. Admin-only. By default clears the whole log for
+    the school; narrow it with ?status= or ?older_than_days=. This removes only
+    the message-delivery trail — it never touches results, fees or any records.
+    """
+    school_id = tenant_scope(user)
+    stmt = delete(MessageLog).where(MessageLog.school_id == school_id)
+    if status:
+        stmt = stmt.where(MessageLog.status == status)
+    if older_than_days:
+        cutoff = datetime.utcnow() - timedelta(days=older_than_days)
+        stmt = stmt.where(MessageLog.created_at < cutoff)
+    res = await db.execute(stmt)
+    await db.commit()
+    return {"deleted": res.rowcount or 0}
 
 
 @router.get("/status")

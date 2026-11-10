@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { api, ApiError } from "@/lib/api";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { api, ApiError, me } from "@/lib/api";
+import { Kpi, BRAND as C } from "@/components/Panels";
 
 type ChannelStatus = { provider: string; live: boolean; message: string;
                        sender_id?: string | null; sender?: string | null };
@@ -36,16 +37,45 @@ export default function DeliveryLogPage() {
   const [status, setStatus] = useState<Status | null>(null);
   const [rows, setRows] = useState<LogRow[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [role, setRole] = useState("");
+  const [clearOpen, setClearOpen] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setErr(null);
     api<Status>("/api/notifications/status").then(setStatus).catch(() => {});
-    api<LogRow[]>("/api/notifications/logs?limit=50")
+    api<LogRow[]>("/api/notifications/logs?limit=200")
       .then(setRows)
       .catch((e) => setErr(e instanceof ApiError ? e.message : "Could not load the delivery log."));
   }, []);
 
   useEffect(load, [load]);
+  useEffect(() => { me().then((u) => setRole(u.role)).catch(() => {}); }, []);
+
+  const isAdmin = role === "school_admin" || role === "super_admin";
+
+  const counts = useMemo(() => {
+    const r = rows ?? [];
+    return {
+      total: r.length,
+      sent: r.filter((x) => x.status === "sent").length,
+      failed: r.filter((x) => x.status === "failed").length,
+      mock: r.filter((x) => x.status === "mock").length,
+    };
+  }, [rows]);
+
+  async function clearLogs(query: string, label: string) {
+    setClearing(true); setNotice(null);
+    try {
+      const r = await api<{ deleted: number }>(`/api/notifications/logs${query}`, { method: "DELETE" });
+      setNotice(`Cleared ${r.deleted} ${label} log entr${r.deleted === 1 ? "y" : "ies"}.`);
+      setClearOpen(false);
+      load();
+    } catch (e) {
+      setNotice(e instanceof ApiError ? e.message : "Could not clear the log.");
+    } finally { setClearing(false); }
+  }
 
   return (
     <div className="space-y-5 max-w-3xl">
@@ -56,10 +86,54 @@ export default function DeliveryLogPage() {
             Every SMS and email the system tries to send, and what happened to it.
           </p>
         </div>
-        <button onClick={load} className="shrink-0 rounded-md border border-line px-3 py-1.5 text-sm hover:bg-paper">
-          Refresh
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={load} className="rounded-md border border-line px-3 py-1.5 text-sm hover:bg-paper">
+            Refresh
+          </button>
+          {isAdmin && rows && rows.length > 0 && (
+            <button onClick={() => { setClearOpen((o) => !o); setNotice(null); }}
+                    className="rounded-md border border-sanction/40 text-sanction px-3 py-1.5 text-sm font-medium hover:bg-sanction hover:text-white transition-colors">
+              Clear log
+            </button>
+          )}
+        </div>
       </header>
+
+      {clearOpen && (
+        <div className="rounded-xl border border-sanction/30 bg-sanction/5 p-4 space-y-3">
+          <p className="text-sm font-medium text-ink">Clear the delivery log?</p>
+          <p className="text-xs text-ink-soft">
+            This permanently removes delivery-log entries. It does <strong>not</strong> touch
+            results, fees, students or any school records — only the record of messages sent.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => clearLogs("", "")} disabled={clearing}
+                    className="rounded-md bg-sanction text-white px-4 py-2 text-sm font-medium hover:opacity-90 disabled:opacity-50">
+              {clearing ? "Clearing…" : "Clear everything"}
+            </button>
+            <button onClick={() => clearLogs("?status=failed", "failed")} disabled={clearing}
+                    className="rounded-md border border-line px-4 py-2 text-sm font-medium hover:border-ink disabled:opacity-50">
+              Clear failed only
+            </button>
+            <button onClick={() => clearLogs("?older_than_days=30", "older")} disabled={clearing}
+                    className="rounded-md border border-line px-4 py-2 text-sm font-medium hover:border-ink disabled:opacity-50">
+              Clear older than 30 days
+            </button>
+            <button onClick={() => setClearOpen(false)} disabled={clearing}
+                    className="ml-auto text-sm text-ink-soft underline underline-offset-2">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {notice && <p className="text-sm text-ledger">{notice}</p>}
+
+      {rows && rows.length > 0 && (
+        <div className="grid grid-cols-3 gap-3 fiyox-rise">
+          <Kpi label="Delivered" value={counts.sent.toString()} accent={C.ledger} />
+          <Kpi label="Failed" value={counts.failed.toString()} accent={counts.failed > 0 ? C.sanction : C.inkSoft} />
+          <Kpi label="Not sent (preview)" value={counts.mock.toString()} accent={C.brass} />
+        </div>
+      )}
 
       {status && (
         <div className="grid sm:grid-cols-2 gap-3">
