@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Kpi, BRAND as C } from "@/components/Panels";
 import { api, ApiError } from "@/lib/api";
 
 type Role = "school_admin" | "bursar" | "teacher" | "parent" | "student";
@@ -344,6 +345,17 @@ export default function UsersPage() {
     </span>
   );
 
+  const stats = useMemo(() => {
+    const staffRoles = ["school_admin", "principal", "bursar", "teacher"];
+    return {
+      total: users.length,
+      active: users.filter((u) => u.is_active).length,
+      inactive: users.filter((u) => !u.is_active).length,
+      staff: users.filter((u) => staffRoles.includes(u.role)).length,
+      unverified: users.filter((u) => staffRoles.includes(u.role) && u.email && !u.email_verified).length,
+    };
+  }, [users]);
+
   return (
     <div className="space-y-5">
       <header>
@@ -353,6 +365,20 @@ export default function UsersPage() {
           shown once — the person changes it under Account after first sign-in.
         </p>
       </header>
+
+      {/* account summary */}
+      {users.length > 0 && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 fiyox-rise">
+          <Kpi label={filter ? ROLE_LABEL[filter] ?? "Accounts" : "All accounts"}
+               value={stats.total.toLocaleString()} accent={C.ink} />
+          <Kpi label="Active" value={stats.active.toLocaleString()}
+               hint={stats.inactive > 0 ? `${stats.inactive} deactivated` : "all signed-in ready"} accent={C.ledger} />
+          <Kpi label="Staff" value={stats.staff.toLocaleString()} accent={C.inkSoft} />
+          <Kpi label="Email unverified" value={stats.unverified.toLocaleString()}
+               hint={stats.unverified > 0 ? "staff to chase" : "all verified"}
+               accent={stats.unverified > 0 ? C.brass : C.ledger} />
+        </div>
+      )}
 
       {/* create form */}
       <section className="rounded-lg border border-line bg-card p-4 space-y-3 max-w-3xl">

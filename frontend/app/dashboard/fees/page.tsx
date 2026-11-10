@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, openPdf, downloadFile, ApiError } from "@/lib/api";
 import { cachedGet, queuedPost, putCache } from "@/lib/offline/offlineApi";
+import { Kpi, BRAND as C } from "@/components/Panels";
+import { Donut, ProgressRing } from "@/components/Charts";
 
 type Term = { id: string; name: string; session: string; is_current: boolean };
 type Arm = { id: string; label: string };
@@ -418,12 +420,7 @@ export default function FeesPage() {
     finally { setBusy(null); }
   }
 
-  const cards = summary && [
-    { label: "Expected", value: ngn(summary.expected) },
-    { label: "Collected", value: ngn(summary.collected) },
-    { label: "Outstanding", value: ngn(summary.outstanding) },
-    { label: "Collection rate", value: `${summary.collection_rate}%` },
-  ];
+  const statusOf = summary?.by_status ?? {};
 
   const debtorQuery = useCallback(() => {
     const p = new URLSearchParams();
@@ -660,23 +657,35 @@ export default function FeesPage() {
         )}
       </div>
 
-      {cards && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {cards.map((c) => (
-            <div key={c.label} className="rounded-lg border border-line bg-card p-4">
-              <p className="text-xs text-ink-soft">{c.label}</p>
-              <p className="text-xl font-semibold tabular mt-1">{c.value}</p>
-            </div>
-          ))}
-        </div>
-      )}
-
       {summary && (
-        <p className="text-xs text-ink-soft">
-          {summary.invoices} invoice{summary.invoices === 1 ? "" : "s"} ·{" "}
-          {summary.by_status["paid"] ?? 0} paid · {summary.by_status["part_paid"] ?? 0} part-paid ·{" "}
-          {summary.by_status["unpaid"] ?? 0} unpaid
-        </p>
+        <div className="space-y-3 fiyox-rise">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <Kpi label="Expected" value={ngn(summary.expected)} accent={C.ink} />
+            <Kpi label="Collected" value={ngn(summary.collected)}
+                 hint={`${summary.collection_rate}% of expected`} accent={C.ledger} />
+            <Kpi label="Outstanding" value={ngn(summary.outstanding)}
+                 hint={`${summary.debtors.length} debtor${summary.debtors.length === 1 ? "" : "s"}`}
+                 accent={summary.outstanding > 0 ? C.sanction : C.ledger} />
+            <Kpi label="Invoices" value={summary.invoices.toLocaleString()}
+                 hint={`${statusOf["paid"] ?? 0} paid · ${statusOf["part_paid"] ?? 0} part · ${statusOf["unpaid"] ?? 0} unpaid`}
+                 accent={C.inkSoft} />
+          </div>
+          {summary.expected > 0 && (
+            <div className="grid md:grid-cols-3 gap-3">
+              <div className="bg-card border border-line rounded-xl p-5 grid place-items-center">
+                <ProgressRing value={summary.collection_rate} sub="collected" label="of expected fees"
+                              color={summary.collection_rate >= 70 ? C.ledger : C.brass} />
+              </div>
+              <div className="bg-card border border-line rounded-xl p-5 md:col-span-2">
+                <p className="text-xs text-ink-soft mb-3 uppercase tracking-wide">Collected vs outstanding</p>
+                <Donut centerSub="expected" data={[
+                  { label: "Collected", value: summary.collected, color: C.ledger },
+                  { label: "Outstanding", value: summary.outstanding, color: C.sanction },
+                ]} />
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       {termId && invoices.length === 0 && (

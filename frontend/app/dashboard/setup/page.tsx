@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError, downloadFile } from "@/lib/api";
 import { useToast } from "@/components/Toast";
+import { BRAND as C } from "@/components/Panels";
+import { ProgressRing } from "@/components/Charts";
 
 type Term = {
   id: string; name: string; session: string; is_current: boolean;
@@ -494,6 +496,38 @@ export default function SetupPage() {
           once — everything else in Fiyox depends on it.
         </p>
       </header>
+
+      {/* setup readiness */}
+      {(() => {
+        const items = [
+          { label: "Terms & session", done: terms.length > 0 },
+          { label: "Classes & arms", done: arms.length > 0 },
+          { label: "Subjects", done: subjects.length > 0 },
+          { label: "Score columns", done: components.length > 0 },
+          { label: "Grading scale", done: gbands.length > 0 },
+          { label: "Admission number format", done: !!admPrefix.trim() },
+        ];
+        const done = items.filter((i) => i.done).length;
+        const pct = Math.round((done / items.length) * 100);
+        return (
+          <div className="rounded-xl border border-line bg-card p-5 flex flex-col sm:flex-row items-center gap-6 fiyox-rise">
+            <ProgressRing value={pct} sub={pct === 100 ? "ready" : "set up"} label={`${done} of ${items.length} essentials`}
+                          color={pct === 100 ? C.ledger : C.brass} size={128} />
+            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 text-sm w-full">
+              {items.map((i) => (
+                <li key={i.label} className="flex items-center gap-2">
+                  <span className="grid h-5 w-5 place-items-center rounded-full text-xs shrink-0"
+                        style={{ background: i.done ? C.ledger : "var(--color-line,#e5e7eb)",
+                                 color: i.done ? "#fff" : "var(--color-ink-soft,#274264)" }}>
+                    {i.done ? "✓" : "–"}
+                  </span>
+                  <span className={i.done ? "text-ink" : "text-ink-soft"}>{i.label}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      })()}
 
       {notice && (
         <p role="status"

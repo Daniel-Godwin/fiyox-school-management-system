@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, me, ApiError, User } from "@/lib/api";
+import { api, me, ApiError, User, ROLE_LABEL } from "@/lib/api";
 
 type Availability = { phone: boolean; email: boolean; online_payments: boolean };
 
@@ -87,6 +87,23 @@ export default function AccountPage() {
           Verify your email and change your password.
         </p>
       </header>
+
+      {/* ---- profile header ---- */}
+      {user && (
+        <div className="rounded-xl bg-ink text-white p-5 flex items-center gap-4 relative overflow-hidden fiyox-rise">
+          <div className="absolute top-0 right-0 w-20 h-20 bg-brass/80 [clip-path:polygon(100%_0,0_0,100%_100%)]" />
+          <div className="grid h-14 w-14 shrink-0 place-items-center rounded-full bg-brass text-ink text-xl font-bold">
+            {(user.first_name?.[0] ?? "") + (user.last_name?.[0] ?? "")}
+          </div>
+          <div className="min-w-0">
+            <p className="text-lg font-semibold truncate">{user.first_name} {user.last_name}</p>
+            <p className="text-sm text-white/70 truncate">{user.email}</p>
+            <span className="inline-block mt-1 rounded-full bg-white/10 px-2.5 py-0.5 text-xs text-brass">
+              {ROLE_LABEL[user.role] ?? user.role}
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* ---- email verification ---- */}
       {user && (
