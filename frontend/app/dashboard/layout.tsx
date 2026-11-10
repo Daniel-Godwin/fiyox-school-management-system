@@ -79,6 +79,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   // close the drawer whenever the route changes (i.e. a nav item was tapped)
   useEffect(() => { setMenuOpen(false); }, [pathname]);
 
+  // lock the background page from scrolling while the mobile drawer is open
+  useEffect(() => {
+    if (!menuOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [menuOpen]);
+
   if (!user) {
     return <FiyoxLoader fullScreen label="Loading your workspace…" />;
   }
@@ -127,7 +135,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       {menuOpen && (
         <div className="md:hidden fixed inset-0 z-30 bg-black/40" onClick={() => setMenuOpen(false)}>
           <nav
-            className="mt-[52px] bg-ink text-white px-4 pb-6 pt-2 flex flex-col gap-1 shadow-xl"
+            className="mt-[52px] max-h-[calc(100dvh-52px)] overflow-y-auto overscroll-contain bg-ink text-white px-4 pb-6 pt-2 flex flex-col gap-1 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             {navLinks}
