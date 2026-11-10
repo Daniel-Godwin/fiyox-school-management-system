@@ -3,6 +3,8 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { api, openPdf, User, ApiError } from "@/lib/api";
 import { cachedGet, queuedPost, putCache } from "@/lib/offline/offlineApi";
+import { Kpi, BRAND as C } from "@/components/Panels";
+import { Columns } from "@/components/Charts";
 
 type Term = { id: string; name: string; session: string; is_current: boolean };
 type Arm = { id: string; label: string };
@@ -280,6 +282,22 @@ export default function ResultsPage() {
     rows?.some((r) => r.approval_status === "approved" && !r.is_published) ?? false;
   const returnNote = rows?.find((r) => r.approval_status === "draft" && r.approval_note)?.approval_note ?? "";
 
+  // class performance summary from the computed rows
+  const computedRows = rows?.filter((r) => r.computed && r.average !== null) ?? [];
+  const classAvg = computedRows.length
+    ? Math.round(computedRows.reduce((s, r) => s + (r.average || 0), 0) / computedRows.length) : null;
+  const passRate = computedRows.length
+    ? Math.round((computedRows.filter((r) => (r.average || 0) >= 40).length / computedRows.length) * 100) : null;
+  const topAvg = computedRows.length ? Math.max(...computedRows.map((r) => r.average || 0)) : null;
+  const inBand = (lo: number, hi: number) => computedRows.filter((r) => (r.average || 0) >= lo && (r.average || 0) < hi).length;
+  const bands = [
+    { label: "70+", value: inBand(70, 1e9), color: C.ledger },
+    { label: "60s", value: inBand(60, 70), color: C.ledger },
+    { label: "50s", value: inBand(50, 60), color: C.brass },
+    { label: "40s", value: inBand(40, 50), color: C.brass },
+    { label: "<40", value: inBand(0, 40), color: C.sanction },
+  ];
+
   return (
     <div className="space-y-5">
       <header>
@@ -455,6 +473,25 @@ export default function ResultsPage() {
               this class {notComputed === 1 ? "has" : "have"} no computed result for this term yet
               {isAdmin ? " — enter their scores, then use Compute results." : "."}
             </p>
+          )}
+
+          {/* class performance summary */}
+          {computedRows.length > 0 && (
+            <div className="space-y-3 fiyox-rise">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <Kpi label="Computed" value={computedRows.length.toString()}
+                     hint={notComputed > 0 ? `${notComputed} still pending` : "whole class"} accent={C.ink} />
+                <Kpi label="Class average" value={classAvg === null ? "—" : `${classAvg}%`}
+                     accent={classAvg !== null && classAvg >= 50 ? C.ledger : C.brass} />
+                <Kpi label="Pass rate" value={passRate === null ? "—" : `${passRate}%`}
+                     hint="at or above 40%" accent={passRate !== null && passRate >= 60 ? C.ledger : C.brass} />
+                <Kpi label="Top average" value={topAvg === null ? "—" : `${topAvg}%`} accent={C.ledger} />
+              </div>
+              <div className="bg-card border border-line rounded-xl p-5">
+                <p className="text-xs text-ink-soft mb-3 uppercase tracking-wide">Average spread</p>
+                <Columns data={bands} />
+              </div>
+            </div>
           )}
 
           {rows && rows.length > 0 && (

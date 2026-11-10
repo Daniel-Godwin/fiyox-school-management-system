@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError } from "@/lib/api";
 import { cachedGet, queuedPost, putCache } from "@/lib/offline/offlineApi";
+import { Kpi, BRAND as C } from "@/components/Panels";
 
 type Term = { id: string; name: string; session: string; is_current: boolean };
 type Arm = { id: string; label: string };
@@ -185,6 +186,24 @@ export default function ScoreEntryPage() {
       return raw && !Number.isNaN(n) ? sum + n : sum;
     }, 0);
 
+  // live entry progress + running class average as the teacher fills the sheet
+  const progress = useMemo(() => {
+    const totalCells = students.length * components.length;
+    let filled = 0;
+    const totals: number[] = [];
+    for (const s of students) {
+      let any = false, t = 0;
+      for (const c of components) {
+        const raw = cells[k(s.id, c.id)];
+        if (raw !== undefined && raw.trim() !== "" && !isInvalid(c.id, raw)) { filled++; any = true; t += Number(raw); }
+      }
+      if (any) totals.push(t);
+    }
+    const avg = totals.length ? Math.round(totals.reduce((a, b) => a + b, 0) / totals.length) : null;
+    return { totalCells, filled, withScores: totals.length,
+             pct: totalCells ? Math.round((filled / totalCells) * 100) : 0, avg };
+  }, [students, components, cells, maxByComp]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div className="space-y-5">
       <header>
@@ -249,6 +268,23 @@ export default function ScoreEntryPage() {
 
       {ready && !loading && students.length > 0 && (
         <>
+          {/* live entry progress */}
+          <div className="space-y-2 fiyox-rise max-w-3xl">
+            <div className="grid grid-cols-3 gap-3">
+              <Kpi label="Students" value={students.length.toString()} accent={C.ink} />
+              <Kpi label="Scores entered" value={`${progress.filled}/${progress.totalCells}`}
+                   hint={`${progress.pct}% complete`}
+                   accent={progress.pct === 100 ? C.ledger : C.brass} />
+              <Kpi label="Class average" value={progress.avg === null ? "—" : String(progress.avg)}
+                   hint={progress.withScores ? `${progress.withScores} with scores` : undefined}
+                   accent={C.inkSoft} />
+            </div>
+            <div className="h-2 rounded-full bg-paper overflow-hidden">
+              <div className="h-full rounded-full"
+                   style={{ width: `${progress.pct}%`, background: progress.pct === 100 ? C.ledger : C.brass, transition: "width .3s ease" }} />
+            </div>
+          </div>
+
           {/* tablet / desktop: the full sheet as a table */}
           <div className="hidden md:block overflow-x-auto rounded-lg border border-line bg-card">
             <table className="min-w-full text-sm">

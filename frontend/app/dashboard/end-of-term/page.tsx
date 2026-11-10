@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
+import { Kpi, BRAND as C } from "@/components/Panels";
 
 type Arm = { id: string; label: string };
 type Term = { id: string; name: string; session: string; is_current: boolean };
@@ -184,9 +185,16 @@ export default function EndOfTermPage() {
           </p>
         )}
         {risks && risks.length > 0 && (
-          <p className="text-xs text-ink-soft">
-            {risks.length} student{risks.length === 1 ? "" : "s"} flagged.
-          </p>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 fiyox-rise">
+            <Kpi label="Flagged" value={risks.length.toString()}
+                 hint="need attention" accent={C.ink} />
+            <Kpi label="High risk" value={risks.filter((r) => r.level === "high").length.toString()}
+                 accent={C.sanction} />
+            <Kpi label="Moderate" value={risks.filter((r) => r.level === "moderate").length.toString()}
+                 accent={C.brass} />
+            <Kpi label="Watch" value={risks.filter((r) => r.level === "watch").length.toString()}
+                 accent={C.inkSoft} />
+          </div>
         )}
         {risks && risks.length > 0 && (
           <div className="space-y-2">
