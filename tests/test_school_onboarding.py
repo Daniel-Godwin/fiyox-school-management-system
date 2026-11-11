@@ -8,13 +8,8 @@ from tests.conftest import headers
 
 
 async def _super(client, ids):
-    from app.core.security import hash_password
-    from app.models.school import Role, User
-    async with ids["session_factory"]() as db:
-        db.add(User(school_id=None, email="owner@fiyox.ng",
-                    hashed_password=hash_password("owner123"),
-                    role=Role.SUPER_ADMIN, first_name="Daniel", last_name="Godwin"))
-        await db.commit()
+    # the platform owner is already seeded by the test fixture; logging in as a
+    # second identical super_admin would (correctly) be rejected as ambiguous
     return await headers(client, "owner@fiyox.ng", "owner123")
 
 

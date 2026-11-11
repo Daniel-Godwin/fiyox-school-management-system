@@ -73,13 +73,7 @@ async def test_the_school_can_switch_online_payment_on(ctx):
 
 async def test_offboarding_a_school_locks_everyone_but_destroys_nothing(ctx):
     client, ids = ctx
-    from app.core.security import hash_password
-    from app.models.school import Role, User
-    async with ids["session_factory"]() as db:
-        db.add(User(school_id=None, email="owner@fiyox.ng",
-                    hashed_password=hash_password("owner123"),
-                    role=Role.SUPER_ADMIN, first_name="D", last_name="G"))
-        await db.commit()
+    # the platform owner is already seeded by the test fixture
     sh = await headers(client, "owner@fiyox.ng", "owner123")
 
     # a pilot school with an admin
