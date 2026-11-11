@@ -38,6 +38,7 @@ async def change_password(payload: ChangePasswordIn, db: DbDep, user: CurrentUse
     if not verify_password(payload.current_password, fresh.hashed_password):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
     fresh.hashed_password = hash_password(payload.new_password)
+    fresh.must_change_password = False
     fresh.updated_by = user.id
     await db.commit()
     return {"changed": True}

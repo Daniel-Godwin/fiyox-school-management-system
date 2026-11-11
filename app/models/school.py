@@ -1,6 +1,6 @@
 """The tenant (School) and platform/tenant Users with RBAC roles."""
 import enum
-from sqlalchemy import Boolean, Integer, JSON, String, UniqueConstraint, Text
+from sqlalchemy import Boolean, Integer, JSON, String, UniqueConstraint, Text, false
 from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import Base, UUIDMixin, TimestampMixin
 
@@ -95,3 +95,7 @@ class User(Base, UUIDMixin, TimestampMixin):
     phone_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # True while the account is still on an admin-issued temporary password; the
+    # dashboard nudges the user to set their own, and change-password clears it
+    must_change_password: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false(), nullable=False)

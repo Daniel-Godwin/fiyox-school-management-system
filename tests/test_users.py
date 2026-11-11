@@ -94,3 +94,31 @@ async def test_rbac_and_self_protection(ctx):
     temp = (await client.post(f"/api/users/{res['user']['id']}/reset-password",
                               headers=ah)).json()["temporary_password"]
     assert await login(client, "forgot@x.ng", temp)
+
+async def test_temporary_password_prompt_lifecycle(ctx):
+    """A new/reset account is flagged to change its temporary password; the
+    user's own change-password clears the flag."""
+    client, ids = ctx
+    ah = await headers(client, "admin@gss-ikeja.ng", "admin123")
+
+    res = (await client.post("/api/users", headers=ah, json={
+        "email": "tempflag@gss-ikeja.ng", "role": "teacher",
+        "first_name": "Temp", "last_name": "Flag"})).json()
+    temp = res["temporary_password"]
+    uid = res["user"]["id"]
+
+    # freshly created → prompt is on
+    h = await headers(client, "tempflag@gss-ikeja.ng", temp)
+    assert (await client.get("/api/auth/me", headers=h)).json()["must_change_password"] is True
+
+    # the user sets their own password → prompt clears
+    await client.post("/api/auth/change-password", headers=h, json={
+        "current_password": temp, "new_password": "myownpass1"})
+    h2 = await headers(client, "tempflag@gss-ikeja.ng", "myownpass1")
+    assert (await client.get("/api/auth/me", headers=h2)).json()["must_change_password"] is False
+
+    # an admin reset re-raises the prompt
+    new_temp = (await client.post(f"/api/users/{uid}/reset-password",
+                                  headers=ah)).json()["temporary_password"]
+    h3 = await headers(client, "tempflag@gss-ikeja.ng", new_temp)
+    assert (await client.get("/api/auth/me", headers=h3)).json()["must_change_password"] is True
