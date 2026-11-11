@@ -1,7 +1,7 @@
 """School onboarding endpoints (platform super admin)."""
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, func
 from app.core.deps import DbDep, require_roles
 from app.core.security import hash_password
 from app.models.school import School, User, Role, DEFAULT_GRADING
@@ -30,6 +30,14 @@ async def create_school(
     if exists.scalars().first():
         raise HTTPException(status_code=409, detail="School slug already taken")
 
+    # emails are globally unique (one email = one account); normalise and check
+    # across every school before standing up the new admin
+    admin_email = str(payload.admin_email).strip().lower()
+    dup = (await db.execute(select(User).where(
+        func.lower(User.email) == admin_email, User.deleted_at.is_(None)))).scalars().first()
+    if dup:
+        raise HTTPException(status_code=409, detail="A user with this email already exists")
+
     school = School(name=payload.name, slug=payload.slug, state=payload.state,
                     phone=payload.phone)
     db.add(school)
@@ -37,7 +45,7 @@ async def create_school(
 
     admin = User(
         school_id=school.id,
-        email=payload.admin_email,
+        email=admin_email,
         hashed_password=hash_password(payload.admin_password),
         role=Role.SCHOOL_ADMIN,
         first_name=payload.admin_first_name,
@@ -63,12 +71,14 @@ async def create_school_account(
     if not school or school.deleted_at:
         raise HTTPException(status_code=404, detail="School not found")
 
+    # emails are globally unique (one email = one account), so the duplicate
+    # check spans every school; a soft-deleted account frees its email for reuse
     email = str(payload.email).strip().lower()
     dup = (await db.execute(select(User).where(
-        User.school_id == school_id, User.email == email))).scalars().first()
+        func.lower(User.email) == email, User.deleted_at.is_(None)))).scalars().first()
     if dup:
         raise HTTPException(status_code=409,
-                            detail="A user with this email already exists in this school")
+                            detail="A user with this email already exists")
 
     pwd = payload.password or _secrets.token_urlsafe(8)
     user = User(school_id=school_id, email=email,
@@ -392,9 +402,12 @@ async def offboard_school(
     now = datetime.now(timezone.utc)
     blocked = 0
     for u in users:
-        if u.is_active:
-            u.is_active = False
-            blocked += 1
+        # fully retire the account: deactivate AND soft-delete, so its email
+        # stops shadowing live accounts at login and is freed for reuse. The row
+        # itself is kept (soft delete) for audit and possible reactivation.
+        u.is_active = False
+        u.deleted_at = now
+        blocked += 1
     school.deleted_at = now
 
     await record_audit(db, school_id=school_id, user_id=owner.id,

@@ -39,10 +39,12 @@ async def create_user(
                             detail="Principal accounts are created by the platform owner")
 
     # normalise so logins (which are case-insensitive) always match, and so a
-    # duplicate check can't be fooled by casing/whitespace
+    # duplicate check can't be fooled by casing/whitespace. Emails are unique
+    # GLOBALLY (one email = one account), so the check spans every school — a
+    # soft-deleted (offboarded) account frees its email for reuse.
     email = payload.email.strip().lower()
     exists = (await db.execute(select(User).where(
-        User.school_id == school_id, func.lower(User.email) == email))).scalars().first()
+        func.lower(User.email) == email, User.deleted_at.is_(None)))).scalars().first()
     if exists:
         raise HTTPException(status_code=409, detail="A user with this email already exists")
 
