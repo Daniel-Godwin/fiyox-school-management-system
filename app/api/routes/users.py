@@ -56,7 +56,9 @@ async def create_user(
         school_id=school_id, email=email,
         hashed_password=hash_password(raw_password),
         role=payload.role, first_name=payload.first_name,
-        last_name=payload.last_name, phone=payload.phone)
+        last_name=payload.last_name, phone=payload.phone,
+        # the account opens on an admin-issued password; prompt them to set own
+        must_change_password=True)
     db.add(user)
     await db.flush()
 
@@ -297,6 +299,7 @@ async def reset_password(
         raise HTTPException(status_code=404, detail="User not found")
     temp = secrets.token_urlsafe(8)
     user.hashed_password = hash_password(temp)
+    user.must_change_password = True
     user.updated_by = admin.id
     await record_audit(db, school_id=school_id, user_id=admin.id, action="update",
                        table_name="users", record_id=user.id,

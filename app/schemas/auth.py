@@ -25,3 +25,4 @@ class UserOut(BaseModel):
     phone: str | None = None
     phone_verified: bool = False
     email_verified: bool = False
+    must_change_password: bool = False
