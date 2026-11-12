@@ -170,6 +170,12 @@ class CBTAttempt(Base, UUIDMixin, TimestampMixin, TenantMixin):
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     status: Mapped[str] = mapped_column(String(12), default=ATTEMPT_IN_PROGRESS)
+    # this sitting's unique, frozen question set + display order: a list of
+    # question ids (into cbt_questions for manual exams, cbt_bank_questions for
+    # pool exams). Snapshotted at start so a refresh or device switch is stable.
+    question_order: Mapped[list] = mapped_column(JSON, default=list)
+    # per-question option display order: {question_id: [option_id, ...]}
+    option_orders: Mapped[dict] = mapped_column(JSON, default=dict)
     # {question_id: answer} — answer shape mirrors a question's `correct`
     answers: Mapped[dict] = mapped_column(JSON, default=dict)
     # per-question outcome snapshot at grading: {question_id: {"correct":bool,"marks":n}}
