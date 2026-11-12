@@ -6,8 +6,11 @@ a multi-select question awards its marks only when the chosen set matches the ke
 exactly. Short answers are matched case- and whitespace-insensitively against a
 list of accepted strings.
 """
+import random
+
 from app.models.cbt import (
     CBTQuestion, Q_SINGLE, Q_MULTIPLE, Q_BOOLEAN, Q_SHORT,
+    DIFFICULTIES, DEFAULT_DIFFICULTY_RATIO,
 )
 
 
@@ -77,3 +80,61 @@ def student_view(q: CBTQuestion) -> dict:
         "marks": q.marks,
         "options": [{"id": o.get("id"), "text": o.get("text")} for o in options],
     }
+
+
+# --------------------------------------------------------------------------
+# question-bank selection + difficulty balancing
+# --------------------------------------------------------------------------
+def difficulty_counts(pool_size: int, ratio: dict | None) -> dict:
+    """Split pool_size across easy/medium/hard by percentage, using
+    largest-remainder rounding so the parts always sum exactly to pool_size."""
+    r = ratio or DEFAULT_DIFFICULTY_RATIO
+    total = sum(float(r.get(d, 0)) for d in DIFFICULTIES) or 1.0
+    raw = {d: pool_size * float(r.get(d, 0)) / total for d in DIFFICULTIES}
+    base = {d: int(raw[d]) for d in DIFFICULTIES}
+    leftover = pool_size - sum(base.values())
+    # hand the remaining slots to the largest fractional parts
+    order = sorted(DIFFICULTIES, key=lambda d: raw[d] - base[d], reverse=True)
+    for d in order[:leftover]:
+        base[d] += 1
+    return base
+
+
+def bank_can_fill(counts_by_diff: dict, pool_size: int, ratio: dict | None) -> tuple[bool, str]:
+    """Publish-time guard: can the bank satisfy this pool exam exactly?"""
+    if pool_size <= 0:
+        return False, "Set how many questions each sitting should draw."
+    total = sum(int(counts_by_diff.get(d, 0)) for d in DIFFICULTIES)
+    if total < pool_size:
+        return False, (f"The bank has {total} question(s) for this subject but "
+                       f"the exam needs {pool_size}.")
+    want = difficulty_counts(pool_size, ratio)
+    for d in DIFFICULTIES:
+        have = int(counts_by_diff.get(d, 0))
+        if have < want[d]:
+            return False, (f"Need {want[d]} {d} question(s) but the bank has "
+                           f"only {have}. Add more or adjust the ratio.")
+    return True, ""
+
+
+def select_balanced(bank: list, pool_size: int, ratio: dict | None, rng=None) -> list:
+    """Draw a balanced, randomly-shuffled subset of bank questions for one
+    sitting. If a difficulty bucket is short it backfills from the rest, so a
+    student always receives pool_size questions even on imperfect banks."""
+    rng = rng or random
+    want = difficulty_counts(pool_size, ratio)
+    buckets = {d: [q for q in bank if getattr(q, "difficulty", None) == d]
+               for d in DIFFICULTIES}
+    chosen: list = []
+    shortfall = 0
+    for d in DIFFICULTIES:
+        take = min(want[d], len(buckets[d]))
+        chosen.extend(rng.sample(buckets[d], take))
+        shortfall += want[d] - take
+    if shortfall > 0:
+        picked = {q.id for q in chosen}
+        leftover = [q for q in bank if q.id not in picked]
+        rng.shuffle(leftover)
+        chosen.extend(leftover[:shortfall])
+    rng.shuffle(chosen)
+    return chosen

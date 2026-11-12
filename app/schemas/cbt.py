@@ -36,10 +36,15 @@ class ExamIn(BaseModel):
     opens_at: datetime | None = None
     closes_at: datetime | None = None
     shuffle_questions: bool = True
+    shuffle_options: bool = True
     show_results_immediately: bool = True
     max_attempts: int = 1
     # result-sheet column this test counts towards; None = practice only
     component_id: str | None = None
+    # question sourcing: "manual" or "pool" (draw a balanced set from the bank)
+    source: str = "manual"
+    pool_size: int = 0
+    difficulty_ratio: dict = Field(default_factory=dict)
 
 
 class ExamPatch(BaseModel):
@@ -49,9 +54,13 @@ class ExamPatch(BaseModel):
     opens_at: datetime | None = None
     closes_at: datetime | None = None
     shuffle_questions: bool | None = None
+    shuffle_options: bool | None = None
     show_results_immediately: bool | None = None
     max_attempts: int | None = None
     component_id: str | None = None
+    source: str | None = None
+    pool_size: int | None = None
+    difficulty_ratio: dict | None = None
 
 
 class ExamOut(BaseModel):
@@ -72,6 +81,10 @@ class ExamOut(BaseModel):
     question_count: int
     status: str
     component_id: str | None = None
+    shuffle_options: bool = True
+    source: str = "manual"
+    pool_size: int = 0
+    difficulty_ratio: dict = Field(default_factory=dict)
     # resolved labels for display (filled by the route, not the ORM)
     subject_name: str | None = None
     class_label: str | None = None
@@ -87,3 +100,54 @@ class ExamDetailOut(ExamOut):
 class SubmitIn(BaseModel):
     answers: dict[str, Any] = Field(default_factory=dict)  # question_id -> answer
     auto: bool = False  # set by the client when the timer ran out
+
+
+# ---------- question bank ----------
+class BankQuestionIn(BaseModel):
+    subject_id: str
+    term_id: str | None = None
+    topic: str = ""
+    difficulty: str = "medium"       # easy | medium | hard
+    type: str = "single"
+    text: str
+    options: list[dict] = Field(default_factory=list)
+    correct: Any = None
+    marks: float = 1.0
+    active: bool = True
+
+
+class BankQuestionPatch(BaseModel):
+    term_id: str | None = None
+    topic: str | None = None
+    difficulty: str | None = None
+    type: str | None = None
+    text: str | None = None
+    options: list[dict] | None = None
+    correct: Any = None
+    marks: float | None = None
+    active: bool | None = None
+
+
+class BankQuestionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    subject_id: str
+    term_id: str | None = None
+    topic: str
+    difficulty: str
+    type: str
+    text: str
+    options: list[dict]
+    correct: Any
+    marks: float
+    active: bool
+    subject_name: str | None = None
+
+
+class BankSummary(BaseModel):
+    """Per-difficulty counts for a subject, for the balancing UI."""
+    subject_id: str
+    easy: int = 0
+    medium: int = 0
+    hard: int = 0
+    total: int = 0
