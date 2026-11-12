@@ -35,7 +35,9 @@ from app.schemas import (
     QuestionIn, QuestionOut, ExamIn, ExamPatch, ExamOut, ExamDetailOut, SubmitIn,
     BankQuestionIn, BankQuestionPatch, BankQuestionOut, BankSummary,
 )
-from app.services.cbt import grade, student_view, bank_can_fill, difficulty_counts
+from app.services.cbt import (
+    grade, student_view, bank_can_fill, difficulty_counts, select_balanced,
+)
 from app.services.teaching import teaches
 from app.services.audit import record_audit
 
@@ -612,6 +614,45 @@ async def available_exams(db: DbDep, user: Annotated[User, StudentRole]):
     return out
 
 
+def _build_attempt_order(ex: CBTExam, questions: list) -> tuple[list, dict]:
+    """Freeze a unique question + option order for one sitting."""
+    qs = list(questions)
+    if ex.shuffle_questions:
+        shuffle(qs)
+    question_order = [q.id for q in qs]
+    option_orders: dict = {}
+    if ex.shuffle_options:
+        for q in qs:
+            if q.type in (Q_SINGLE, Q_MULTIPLE) and q.options:
+                ids = [str(o.get("id")) for o in q.options if o.get("id") is not None]
+                shuffle(ids)
+                option_orders[q.id] = ids
+    return question_order, option_orders
+
+
+async def _resolve_questions(db, school_id: str, ex: CBTExam, attempt: CBTAttempt) -> list:
+    """The question objects this attempt is sitting, in its frozen order, loaded
+    from the exam's own questions (manual) or the bank (pool)."""
+    order = attempt.question_order or []
+    if not order:
+        return []
+    model = CBTBankQuestion if ex.source == SOURCE_POOL else CBTQuestion
+    rows = (await db.execute(select(model).where(
+        model.school_id == school_id, model.id.in_(order)))).scalars().all()
+    by_id = {q.id: q for q in rows}
+    return [by_id[qid] for qid in order if qid in by_id]
+
+
+def _sitting_view(q, option_orders: dict) -> dict:
+    """student_view with this attempt's option order applied."""
+    v = student_view(q)
+    order = (option_orders or {}).get(q.id)
+    if order and v["options"]:
+        pos = {oid: i for i, oid in enumerate(order)}
+        v["options"] = sorted(v["options"], key=lambda o: pos.get(str(o["id"]), 999))
+    return v
+
+
 @router.post("/exams/{exam_id}/start")
 async def start_exam(exam_id: str, db: DbDep, user: Annotated[User, StudentRole]):
     school_id = tenant_scope(user)
@@ -631,26 +672,40 @@ async def start_exam(exam_id: str, db: DbDep, user: Annotated[User, StudentRole]
     if attempt is None:
         if len(attempts) >= ex.max_attempts:
             raise HTTPException(409, "You have used all your attempts for this test")
+        # draw this student's unique question set
+        if ex.source == SOURCE_POOL:
+            bank = (await db.execute(select(CBTBankQuestion).where(
+                CBTBankQuestion.school_id == school_id,
+                CBTBankQuestion.subject_id == ex.subject_id,
+                CBTBankQuestion.active.is_(True),
+                CBTBankQuestion.deleted_at.is_(None)))).scalars().all()
+            chosen = select_balanced(bank, ex.pool_size, ex.difficulty_ratio)
+        else:
+            chosen = await _questions(db, school_id, ex.id)
+        if not chosen:
+            raise HTTPException(409, "This test has no questions available")
+        question_order, option_orders = _build_attempt_order(ex, chosen)
+
         deadline = now + timedelta(minutes=ex.duration_minutes)
         if ex.closes_at and _utc(ex.closes_at) < deadline:
             deadline = _utc(ex.closes_at)
         attempt = CBTAttempt(
             school_id=school_id, exam_id=ex.id, student_id=st.id,
             attempt_no=len(attempts) + 1, started_at=now, deadline_at=deadline,
-            status=ATTEMPT_IN_PROGRESS, answers={})
+            status=ATTEMPT_IN_PROGRESS, answers={},
+            question_order=question_order, option_orders=option_orders)
         db.add(attempt)
         await db.commit()
         await db.refresh(attempt)
 
-    qs = await _questions(db, school_id, ex.id)
-    view = [student_view(q) for q in qs]
-    if ex.shuffle_questions:
-        shuffle(view)
+    # render from the frozen per-attempt order — stable across refresh/resume
+    questions = await _resolve_questions(db, school_id, ex, attempt)
+    view = [_sitting_view(q, attempt.option_orders) for q in questions]
     return {
         "attempt_id": attempt.id,
         "exam": {"id": ex.id, "title": ex.title, "instructions": ex.instructions,
                  "duration_minutes": ex.duration_minutes,
-                 "total_marks": ex.total_marks},
+                 "total_marks": attempt.max_score or ex.total_marks},
         "deadline_at": attempt.deadline_at,
         "server_now": now,
         "saved_answers": attempt.answers or {},
@@ -724,7 +779,7 @@ async def submit_attempt(attempt_id: str, payload: SubmitIn, db: DbDep,
         raise HTTPException(409, "This attempt is already submitted")
 
     ex = await _exam(db, school_id, a.exam_id)
-    qs = await _questions(db, school_id, a.exam_id)
+    qs = await _resolve_questions(db, school_id, ex, a)
     answers = dict(a.answers or {})
     answers.update(payload.answers or {})
 
@@ -765,7 +820,7 @@ async def my_attempt(attempt_id: str, db: DbDep, user: Annotated[User, StudentRo
            "submitted_at": a.submitted_at,
            "show_results": ex.show_results_immediately}
     if a.status == ATTEMPT_SUBMITTED and ex.show_results_immediately:
-        qs = {q.id: q for q in await _questions(db, school_id, a.exam_id)}
+        qs = {q.id: q for q in await _resolve_questions(db, school_id, ex, a)}
         out.update({
             "score": a.score, "max_score": a.max_score,
             "percent": round((a.score / a.max_score) * 100) if a.max_score else 0,
