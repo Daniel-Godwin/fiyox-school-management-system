@@ -9,6 +9,7 @@ export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -67,12 +68,21 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <label htmlFor="password" className="block text-xs font-medium text-ink-soft mb-1">
-              Password
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label htmlFor="password" className="block text-xs font-medium text-ink-soft">
+                Password
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowPassword((s) => !s)}
+                className="text-[11px] text-ink-soft/80 hover:text-ink"
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
+            </div>
             <input
               id="password"
-              type="password"
+              type={showPassword ? "text" : "password"}
               suppressHydrationWarning
               required
               autoComplete="current-password"
@@ -80,6 +90,11 @@ export default function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm"
             />
+            <div className="mt-1.5 text-right">
+              <a href="/forgot-password" className="text-xs text-ink-soft hover:text-ink underline underline-offset-2">
+                Forgot password?
+              </a>
+            </div>
           </div>
 
           {error && (
@@ -98,7 +113,7 @@ export default function LoginPage() {
         </form>
 
         <p className="text-center text-xs text-ink-soft/70 mt-4">
-          Your school admin creates accounts. Forgot your password? Ask them to reset it.
+          Your school admin creates accounts. Use “Forgot password?” to reset yours by email.
         </p>
       </div>
     </main>

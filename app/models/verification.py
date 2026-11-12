@@ -29,6 +29,8 @@ class VerifyChannel(str, enum.Enum):
 
 class VerifyPurpose(str, enum.Enum):
     VERIFY_CONTACT = "verify_contact"
+    # self-service password reset: a code emailed to a user who is locked out
+    RESET_PASSWORD = "reset_password"
     # reserved for the future login-by-code feature; same machinery
     LOGIN_OTP = "login_otp"
 

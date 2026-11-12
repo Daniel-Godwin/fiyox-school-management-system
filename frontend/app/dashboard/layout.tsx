@@ -7,6 +7,7 @@ import { me, clearToken, getToken, ROLE_LABEL, User } from "@/lib/api";
 import { ToastProvider } from "@/components/Toast";
 import SyncStatus from "@/components/SyncStatus";
 import FiyoxLoader from "@/components/FiyoxLoader";
+import ForcePasswordChange from "@/components/ForcePasswordChange";
 
 const NAV: { href: string; label: string; roles: User["role"][] }[] = [
   { href: "/dashboard", label: "Overview",
@@ -72,6 +73,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   function signOut() {
     clearToken();
     router.replace("/login");
+  }
+
+  // reload the session (e.g. after the password gate is cleared) so the flag updates
+  function refreshUser() {
+    me().then(setUser).catch(() => {});
   }
 
   const [menuOpen, setMenuOpen] = useState(false);
@@ -171,22 +177,22 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       </aside>
 
       <main className="p-4 sm:p-5 md:p-8 max-w-full overflow-x-hidden">
-        {user.must_change_password && (
-          <Link href="/dashboard/account"
-                className="mb-4 flex items-center gap-2 rounded-md border border-sanction/40 bg-sanction/10 px-4 py-2.5 text-sm text-sanction hover:bg-sanction/20">
-            <span className="h-1.5 w-1.5 rounded-full bg-sanction shrink-0" />
-            You&apos;re still using a temporary password — tap to set your own secure password.
-          </Link>
+        {user.must_change_password ? (
+          // hard gate: no page is reachable until the temporary password is changed
+          <ForcePasswordChange onDone={refreshUser} />
+        ) : (
+          <>
+            {user.email && !user.email_verified &&
+              ["school_admin", "principal", "bursar", "teacher"].includes(user.role) && (
+              <Link href="/dashboard/account"
+                    className="mb-4 flex items-center gap-2 rounded-md border border-brass/40 bg-brass/10 px-4 py-2.5 text-sm text-brass-ink hover:bg-brass/20">
+                <span className="h-1.5 w-1.5 rounded-full bg-brass shrink-0" />
+                Your email isn&apos;t verified yet — tap to verify {user.email}.
+              </Link>
+            )}
+            <ToastProvider>{children}</ToastProvider>
+          </>
         )}
-        {user.email && !user.email_verified &&
-          ["school_admin", "principal", "bursar", "teacher"].includes(user.role) && (
-          <Link href="/dashboard/account"
-                className="mb-4 flex items-center gap-2 rounded-md border border-brass/40 bg-brass/10 px-4 py-2.5 text-sm text-brass-ink hover:bg-brass/20">
-            <span className="h-1.5 w-1.5 rounded-full bg-brass shrink-0" />
-            Your email isn&apos;t verified yet — tap to verify {user.email}.
-          </Link>
-        )}
-        <ToastProvider>{children}</ToastProvider>
       </main>
     </div>
   );

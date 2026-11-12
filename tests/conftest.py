@@ -139,3 +139,16 @@ async def login(client: AsyncClient, email: str, password: str) -> str:
 
 async def headers(client: AsyncClient, email: str, password: str) -> dict:
     return {"Authorization": f"Bearer {await login(client, email, password)}"}
+
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _clear_login_lockout():
+    """The login lockout is in-process state; clear it around every test so one
+    test's failed logins can never lock an email out for another."""
+    from app.api.routes import auth
+    auth._LOGIN_FAILURES.clear()
+    yield
+    auth._LOGIN_FAILURES.clear()
