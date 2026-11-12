@@ -1,11 +1,12 @@
 """School onboarding endpoints (platform super admin)."""
 from typing import Annotated
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select, func
 from app.core.deps import DbDep, require_roles
-from app.core.security import hash_password
+from app.core.security import hash_password, create_access_token
 from app.models.school import School, User, Role, DEFAULT_GRADING
 from app.schemas import SchoolCreate, SchoolOut
+from app.services.audit import record_audit
 import secrets as _secrets
 from pydantic import BaseModel, EmailStr
 
@@ -422,3 +423,45 @@ async def offboard_school(
                      "retained, not destroyed — the school can be restored by "
                      "support if it returns.")}
 
+
+
+@router.post("/{school_id}/impersonate")
+async def open_school_as_admin(
+    school_id: str, request: Request, db: DbDep,
+    owner: Annotated[User, Depends(require_roles(Role.SUPER_ADMIN))],
+):
+    """Owner-only support tool: mint a session as a school's admin to see exactly
+    what they see. Every use is written to the school's audit log."""
+    school = await db.get(School, school_id)
+    if not school or school.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="School not found")
+
+    admin = (await db.execute(select(User).where(
+        User.school_id == school_id,
+        User.role == Role.SCHOOL_ADMIN,
+        User.is_active.is_(True),
+        User.deleted_at.is_(None),
+    ).order_by(User.created_at.asc()))).scalars().first()
+    if not admin:
+        raise HTTPException(status_code=404,
+                            detail="This school has no active admin to open as")
+
+    await record_audit(
+        db, school_id=school_id, user_id=owner.id, action="impersonate",
+        table_name="users", record_id=admin.id,
+        changes={"impersonated_by": owner.id, "impersonated_email": admin.email},
+        ip_address=request.client.host if request.client else None)
+    await db.commit()
+
+    token = create_access_token(admin.id, admin.school_id,
+                                Role.SCHOOL_ADMIN.value, impersonator=owner.id)
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "acting_as": {
+            "id": admin.id,
+            "name": f"{admin.first_name} {admin.last_name}".strip(),
+            "email": admin.email,
+            "school": school.name,
+        },
+    }

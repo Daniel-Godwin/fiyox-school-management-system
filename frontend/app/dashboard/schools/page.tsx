@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, ApiError } from "@/lib/api";
+import { useRouter } from "next/navigation";
+import { api, ApiError, impersonateSchool } from "@/lib/api";
 
 type SchoolRow = {
   id: string; name: string; slug: string; state: string | null;
@@ -21,6 +22,7 @@ function slugify(name: string): string {
 }
 
 export default function SchoolsConsole() {
+  const router = useRouter();
   const [schools, setSchools] = useState<SchoolRow[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
@@ -68,6 +70,17 @@ export default function SchoolsConsole() {
     crypto.getRandomValues(rnd);
     for (const n of rnd) out += chars[n % chars.length];
     setForm((f) => ({ ...f, admin_password: out }));
+  }
+
+  async function openAsAdmin(s: SchoolRow) {
+    setBusy(true); setNotice(null);
+    try {
+      await impersonateSchool(s.id);
+      router.push("/dashboard");
+    } catch (e) {
+      setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not open this school." });
+      setBusy(false);
+    }
   }
 
   async function offboardSchool(s: SchoolRow) {
@@ -307,6 +320,10 @@ export default function SchoolsConsole() {
                     <td className="px-3 py-2 text-right tabular">{s.bursars}</td>
                     <td className="px-3 py-2 text-xs text-ink-soft">{s.created_at ?? "—"}</td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
+                      <button onClick={() => openAsAdmin(s)} disabled={busy}
+                              className="text-ledger underline underline-offset-2 hover:opacity-70 disabled:opacity-50 text-xs mr-3">
+                        Open as admin
+                      </button>
                       <button onClick={() => { setAccountFor(s); setNotice(null); }} disabled={busy}
                               className="text-ink underline underline-offset-2 hover:text-ink-soft disabled:opacity-50 text-xs mr-3">
                         Add account
