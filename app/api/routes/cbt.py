@@ -25,7 +25,7 @@ from app.models.student import Student
 from app.models.academics import ClassArm, SchoolClass, Subject
 from app.models.results import AssessmentComponent, ScoreEntry
 from app.models.cbt import (
-    CBTExam, CBTQuestion, CBTAttempt, CBTBankQuestion,
+    CBTExam, CBTQuestion, CBTAttempt, CBTBankQuestion, CBTViolation,
     EXAM_DRAFT, EXAM_PUBLISHED, EXAM_CLOSED,
     Q_SINGLE, Q_MULTIPLE, Q_BOOLEAN, Q_SHORT, QUESTION_TYPES,
     ATTEMPT_IN_PROGRESS, ATTEMPT_SUBMITTED,
@@ -33,7 +33,7 @@ from app.models.cbt import (
 )
 from app.schemas import (
     QuestionIn, QuestionOut, ExamIn, ExamPatch, ExamOut, ExamDetailOut, SubmitIn,
-    BankQuestionIn, BankQuestionPatch, BankQuestionOut, BankSummary,
+    BankQuestionIn, BankQuestionPatch, BankQuestionOut, BankSummary, ViolationIn,
 )
 from app.services.cbt import (
     grade, student_view, bank_can_fill, difficulty_counts, select_balanced,
@@ -705,9 +705,11 @@ async def start_exam(exam_id: str, db: DbDep, user: Annotated[User, StudentRole]
         "attempt_id": attempt.id,
         "exam": {"id": ex.id, "title": ex.title, "instructions": ex.instructions,
                  "duration_minutes": ex.duration_minutes,
-                 "total_marks": attempt.max_score or ex.total_marks},
+                 "total_marks": attempt.max_score or ex.total_marks,
+                 "proctored": ex.proctored, "max_violations": ex.max_violations},
         "deadline_at": attempt.deadline_at,
         "server_now": now,
+        "violation_count": attempt.violation_count or 0,
         "saved_answers": attempt.answers or {},
         "questions": view,
     }
@@ -767,6 +769,53 @@ async def _record_to_scoresheet(db, ex: CBTExam, st: Student,
     return True
 
 
+async def _grade_and_close(db, school_id: str, ex: CBTExam, st: Student,
+                           a: CBTAttempt, extra_answers: dict, auto: bool,
+                           actor_id: str):
+    """Grade a sitting against its frozen question set, close it, and (if the
+    test counts towards results) write the scaled score into the report card.
+    Shared by the student's own submit and the server-enforced auto-submit."""
+    qs = await _resolve_questions(db, school_id, ex, a)
+    answers = dict(a.answers or {})
+    answers.update(extra_answers or {})
+    score, max_score, breakdown = grade(qs, answers)
+    a.answers = answers
+    a.breakdown = breakdown
+    a.score = score
+    a.max_score = max_score
+    a.submitted_at = _now()
+    a.status = ATTEMPT_SUBMITTED
+    a.auto_submitted = bool(auto)
+    recorded = await _record_to_scoresheet(db, ex, st, score, max_score, actor_id)
+    return score, max_score, recorded
+
+
+@router.post("/attempts/{attempt_id}/violation")
+async def log_violation(attempt_id: str, payload: ViolationIn, db: DbDep,
+                        user: Annotated[User, StudentRole]):
+    """Record an anti-cheat event. On reaching the exam's limit, the server
+    itself ends the sitting — the client is never trusted to enforce it."""
+    school_id = tenant_scope(user)
+    st = await _my_student(db, user, school_id)
+    a = await db.get(CBTAttempt, attempt_id)
+    if a is None or a.school_id != school_id or a.student_id != st.id:
+        raise HTTPException(404, "Attempt not found")
+    if a.status != ATTEMPT_IN_PROGRESS:
+        return {"count": a.violation_count or 0, "max": 0, "auto_submit": False}
+
+    ex = await _exam(db, school_id, a.exam_id)
+    a.violation_count = (a.violation_count or 0) + 1
+    db.add(CBTViolation(school_id=school_id, attempt_id=a.id,
+                        kind=(payload.kind or "tab_switch")[:24],
+                        detail=(payload.detail or "")[:255]))
+    limit = ex.max_violations or 3
+    auto = a.violation_count >= limit
+    if auto:
+        await _grade_and_close(db, school_id, ex, st, a, {}, True, user.id)
+    await db.commit()
+    return {"count": a.violation_count, "max": limit, "auto_submit": auto}
+
+
 @router.post("/attempts/{attempt_id}/submit")
 async def submit_attempt(attempt_id: str, payload: SubmitIn, db: DbDep,
                          user: Annotated[User, StudentRole]):
@@ -779,23 +828,8 @@ async def submit_attempt(attempt_id: str, payload: SubmitIn, db: DbDep,
         raise HTTPException(409, "This attempt is already submitted")
 
     ex = await _exam(db, school_id, a.exam_id)
-    qs = await _resolve_questions(db, school_id, ex, a)
-    answers = dict(a.answers or {})
-    answers.update(payload.answers or {})
-
-    score, max_score, breakdown = grade(qs, answers)
-    a.answers = answers
-    a.breakdown = breakdown
-    a.score = score
-    a.max_score = max_score
-    a.submitted_at = _now()
-    a.status = ATTEMPT_SUBMITTED
-    a.auto_submitted = bool(payload.auto)
-
-    # if this test is tied to a result-sheet column, record the scaled score
-    # into the student's ScoreEntry so it flows into the report card
-    recorded = await _record_to_scoresheet(db, ex, st, score, max_score, user.id)
-
+    score, max_score, recorded = await _grade_and_close(
+        db, school_id, ex, st, a, payload.answers, bool(payload.auto), user.id)
     await db.commit()
 
     result = {"attempt_id": a.id, "status": a.status,

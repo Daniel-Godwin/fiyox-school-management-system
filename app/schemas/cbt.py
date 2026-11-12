@@ -45,6 +45,9 @@ class ExamIn(BaseModel):
     source: str = "manual"
     pool_size: int = 0
     difficulty_ratio: dict = Field(default_factory=dict)
+    # anti-cheat
+    proctored: bool = False
+    max_violations: int = 3
 
 
 class ExamPatch(BaseModel):
@@ -61,6 +64,8 @@ class ExamPatch(BaseModel):
     source: str | None = None
     pool_size: int | None = None
     difficulty_ratio: dict | None = None
+    proctored: bool | None = None
+    max_violations: int | None = None
 
 
 class ExamOut(BaseModel):
@@ -85,6 +90,8 @@ class ExamOut(BaseModel):
     source: str = "manual"
     pool_size: int = 0
     difficulty_ratio: dict = Field(default_factory=dict)
+    proctored: bool = False
+    max_violations: int = 3
     # resolved labels for display (filled by the route, not the ORM)
     subject_name: str | None = None
     class_label: str | None = None
@@ -151,3 +158,8 @@ class BankSummary(BaseModel):
     medium: int = 0
     hard: int = 0
     total: int = 0
+
+
+class ViolationIn(BaseModel):
+    kind: str = "tab_switch"     # tab_switch | blur | fullscreen_exit | ...
+    detail: str = ""

@@ -82,6 +82,11 @@ class CBTExam(Base, UUIDMixin, TimestampMixin, TenantMixin):
     show_results_immediately: Mapped[bool] = mapped_column(Boolean, default=True)
     max_attempts: Mapped[int] = mapped_column(Integer, default=1)
 
+    # anti-cheat: force full-screen + lock copy/paste/right-click, and auto-submit
+    # once a sitting accrues this many tab-switch / visibility violations
+    proctored: Mapped[bool] = mapped_column(Boolean, default=False)
+    max_violations: Mapped[int] = mapped_column(Integer, default=3)
+
     # question sourcing: "manual" (author's own questions) or "pool" (each
     # sitting draws a balanced subset from the tenant's question bank)
     source: Mapped[str] = mapped_column(String(10), default=SOURCE_MANUAL,
@@ -184,3 +189,15 @@ class CBTAttempt(Base, UUIDMixin, TimestampMixin, TenantMixin):
     max_score: Mapped[float] = mapped_column(Float, default=0.0)
     # true when submitted because the timer ran out rather than by the student
     auto_submitted: Mapped[bool] = mapped_column(Boolean, default=False)
+    # count of anti-cheat violations during this sitting (tab switch / blur)
+    violation_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class CBTViolation(Base, UUIDMixin, TimestampMixin, TenantMixin):
+    """An anti-cheat event captured during a sitting, for the proctor log."""
+    __tablename__ = "cbt_violations"
+
+    attempt_id: Mapped[str] = mapped_column(
+        ForeignKey("cbt_attempts.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(24), default="tab_switch")
+    detail: Mapped[str] = mapped_column(String(255), default="")
