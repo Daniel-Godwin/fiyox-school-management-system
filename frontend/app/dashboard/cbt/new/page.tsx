@@ -31,6 +31,8 @@ export default function NewCBT() {
   const [shuffleOptions, setShuffleOptions] = useState(true);
   const [showResults, setShowResults] = useState(true);
   const [source, setSource] = useState<"manual" | "pool">("manual");
+  const [proctored, setProctored] = useState(false);
+  const [maxViolations, setMaxViolations] = useState(3);
   const [poolSize, setPoolSize] = useState(25);
   const [ratio, setRatio] = useState({ easy: 40, medium: 40, hard: 20 });
   const [bank, setBank] = useState<{ easy: number; medium: number; hard: number; total: number } | null>(null);
@@ -106,6 +108,8 @@ export default function NewCBT() {
           source,
           pool_size: source === "pool" ? Number(poolSize) : 0,
           difficulty_ratio: source === "pool" ? ratio : {},
+          proctored,
+          max_violations: Number(maxViolations),
         }),
       });
       router.push(`/dashboard/cbt/${exam.id}`);
@@ -263,6 +267,19 @@ export default function NewCBT() {
             <input type="checkbox" checked={showResults} onChange={(e) => setShowResults(e.target.checked)} />
             Show each student their score immediately after submitting
           </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={proctored} onChange={(e) => setProctored(e.target.checked)} />
+            Proctored — full-screen lock, block copy/paste, and detect tab-switching
+          </label>
+          {proctored && (
+            <div className="flex items-center gap-2 text-sm pl-6">
+              <span className="text-ink-soft">Auto-submit after</span>
+              <input type="number" min={1} max={10} value={maxViolations}
+                     onChange={(e) => setMaxViolations(Number(e.target.value))}
+                     className="w-16 rounded-md border border-line bg-white px-2 py-1 text-sm" />
+              <span className="text-ink-soft">times the student leaves the test</span>
+            </div>
+          )}
         </div>
 
         <div className="flex gap-3 pt-2">
