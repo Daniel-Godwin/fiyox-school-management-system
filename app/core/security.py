@@ -40,10 +40,13 @@ def weak_password_reason(raw: str) -> str | None:
     return None
 
 
-def create_access_token(subject: str, school_id: str | None, role: str) -> str:
+def create_access_token(subject: str, school_id: str | None, role: str,
+                        impersonator: str | None = None) -> str:
     """Encode user id, tenant (school) and role directly into the token.
 
     school_id in the token is what scopes every request to a single tenant.
+    When the owner opens a school as its admin, `impersonator` records who is
+    acting — carried in the token for traceability.
     """
     now = datetime.now(timezone.utc)
     payload = {
@@ -53,6 +56,8 @@ def create_access_token(subject: str, school_id: str | None, role: str) -> str:
         "iat": now,
         "exp": now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
     }
+    if impersonator:
+        payload["imp"] = impersonator
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 

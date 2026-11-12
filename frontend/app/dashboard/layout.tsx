@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { me, clearToken, getToken, ROLE_LABEL, User } from "@/lib/api";
+import { me, clearToken, getToken, ROLE_LABEL, User,
+         impersonationInfo, exitImpersonation, ActingAs } from "@/lib/api";
 import { ToastProvider } from "@/components/Toast";
 import SyncStatus from "@/components/SyncStatus";
 import FiyoxLoader from "@/components/FiyoxLoader";
@@ -56,6 +57,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const router = useRouter();
   const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
+  const [acting, setActing] = useState<ActingAs | null>(null);
+
+  useEffect(() => { setActing(impersonationInfo()); }, [user]);
+
+  function exitAsOwner() {
+    exitImpersonation();
+    window.location.href = "/dashboard/schools";
+  }
 
   useEffect(() => {
     if (!getToken()) {
@@ -137,6 +146,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   });
 
   return (
+    <>
+    {acting && (
+      <div className="flex items-center justify-between gap-3 bg-brass text-ink px-4 py-2 text-sm">
+        <span className="truncate">
+          Support mode — viewing <strong>{acting.school}</strong> as {acting.name}
+        </span>
+        <button onClick={exitAsOwner}
+                className="shrink-0 rounded-md bg-ink text-white px-3 py-1 text-xs font-medium hover:bg-ink-soft">
+          Exit to owner
+        </button>
+      </div>
+    )}
     <div className="min-h-screen md:grid md:grid-cols-[230px_1fr]">
       {/* ---- phone/tablet top bar ---- */}
       <header className="md:hidden sticky top-0 z-40 flex items-center justify-between bg-ink text-white px-4 py-3">
@@ -217,5 +238,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         )}
       </main>
     </div>
+    </>
   );
 }

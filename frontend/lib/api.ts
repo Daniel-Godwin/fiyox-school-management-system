@@ -28,6 +28,43 @@ export function setToken(token: string) {
 
 export function clearToken() {
   localStorage.removeItem("fiyox_token");
+  try {
+    localStorage.removeItem("fiyox_owner_token");
+    localStorage.removeItem("fiyox_impersonating");
+  } catch { /* ignore */ }
+}
+
+export type ActingAs = { id: string; name: string; email: string; school: string };
+
+/** Owner support tool: open a school as its admin. Stashes the owner's token so
+ * the session can be restored, then swaps in the admin session. */
+export async function impersonateSchool(schoolId: string): Promise<ActingAs> {
+  const data = await api<{ access_token: string; acting_as: ActingAs }>(
+    `/api/schools/${schoolId}/impersonate`, { method: "POST" });
+  try {
+    const owner = getToken();
+    if (owner) localStorage.setItem("fiyox_owner_token", owner);
+    localStorage.setItem("fiyox_impersonating", JSON.stringify(data.acting_as));
+  } catch { /* ignore */ }
+  setToken(data.access_token);
+  return data.acting_as;
+}
+
+export function impersonationInfo(): ActingAs | null {
+  try {
+    const s = localStorage.getItem("fiyox_impersonating");
+    return s ? (JSON.parse(s) as ActingAs) : null;
+  } catch { return null; }
+}
+
+/** Restore the owner's session after impersonating. */
+export function exitImpersonation() {
+  try {
+    const owner = localStorage.getItem("fiyox_owner_token");
+    if (owner) localStorage.setItem("fiyox_token", owner);
+    localStorage.removeItem("fiyox_owner_token");
+    localStorage.removeItem("fiyox_impersonating");
+  } catch { /* ignore */ }
 }
 
 export class ApiError extends Error {
