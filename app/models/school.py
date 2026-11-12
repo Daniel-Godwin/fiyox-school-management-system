@@ -1,6 +1,9 @@
 """The tenant (School) and platform/tenant Users with RBAC roles."""
 import enum
-from sqlalchemy import Boolean, Integer, JSON, String, UniqueConstraint, Text, false
+from datetime import datetime
+from sqlalchemy import (
+    Boolean, DateTime, Integer, JSON, String, UniqueConstraint, Text, false,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import Base, UUIDMixin, TimestampMixin
 
@@ -99,3 +102,6 @@ class User(Base, UUIDMixin, TimestampMixin):
     # dashboard nudges the user to set their own, and change-password clears it
     must_change_password: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=false(), nullable=False)
+    # updated on each successful login, surfaced on the Account page
+    last_login_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None, nullable=True)

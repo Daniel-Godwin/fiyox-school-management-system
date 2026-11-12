@@ -11,7 +11,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, func
 
 from app.core.deps import DbDep, CurrentUser
-from app.core.security import create_access_token, hash_password, verify_password
+from app.core.security import (
+    create_access_token, hash_password, verify_password, weak_password_reason,
+)
 from app.models.school import User, Role, School
 from app.models.notifications import MessagePurpose
 from app.models.verification import VerificationCode, VerifyChannel, VerifyPurpose
@@ -116,6 +118,8 @@ async def login(form: Annotated[OAuth2PasswordRequestForm, Depends()], db: DbDep
                             detail="This email is linked to more than one active account — contact support")
 
     _clear_login_failures(email)
+    user.last_login_at = datetime.now(timezone.utc)
+    await db.commit()
     role_val = user.role.value if isinstance(user.role, Role) else user.role
     token = create_access_token(user.id, user.school_id, role_val)
     return Token(access_token=token)
@@ -128,6 +132,9 @@ async def change_password(payload: ChangePasswordIn, db: DbDep, user: CurrentUse
     fresh = await db.get(User, user.id)
     if not verify_password(payload.current_password, fresh.hashed_password):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
+    weak = weak_password_reason(payload.new_password)
+    if weak:
+        raise HTTPException(status_code=400, detail=weak)
     fresh.hashed_password = hash_password(payload.new_password)
     fresh.must_change_password = False
     fresh.updated_by = user.id
@@ -231,6 +238,10 @@ async def reset_password(payload: ResetPasswordIn, db: DbDep):
         vc.attempts += 1
         await db.commit()
         raise invalid
+
+    weak = weak_password_reason(payload.new_password)
+    if weak:
+        raise HTTPException(status_code=400, detail=weak)
 
     vc.used = True
     user.hashed_password = hash_password(payload.new_password)

@@ -87,3 +87,19 @@ async def test_login_locks_out_after_repeated_failures(ctx):
     # now locked — even the correct password is refused
     assert (await client.post("/api/auth/login", data={
         "username": email, "password": "admin123"})).status_code == 429
+
+
+async def test_change_password_rejects_a_common_password(ctx):
+    client, ids = ctx
+    uid, temp = await _make_teacher(client, "weakpw@gss-ikeja.ng")
+    h = await headers(client, "weakpw@gss-ikeja.ng", temp)
+    r = await client.post("/api/auth/change-password", headers=h, json={
+        "current_password": temp, "new_password": "password"})  # 8 chars but common
+    assert r.status_code == 400
+
+
+async def test_login_records_last_login_time(ctx):
+    client, ids = ctx
+    h = await headers(client, "admin@gss-ikeja.ng", "admin123")
+    body = (await client.get("/api/auth/me", headers=h)).json()
+    assert body["last_login_at"] is not None

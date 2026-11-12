@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api, me, ApiError, User, ROLE_LABEL } from "@/lib/api";
+import PasswordStrength from "@/components/PasswordStrength";
 
 type Availability = { phone: boolean; email: boolean; online_payments: boolean };
 
@@ -27,8 +28,8 @@ export default function AccountPage() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (next.length < 6) {
-      setNotice({ kind: "err", text: "New password must be at least 6 characters." });
+    if (next.length < 8) {
+      setNotice({ kind: "err", text: "New password must be at least 8 characters." });
       return;
     }
     if (next !== confirm) {
@@ -101,6 +102,11 @@ export default function AccountPage() {
             <span className="inline-block mt-1 rounded-full bg-white/10 px-2.5 py-0.5 text-xs text-brass">
               {ROLE_LABEL[user.role] ?? user.role}
             </span>
+            {user.last_login_at && (
+              <p className="text-[11px] text-white/50 mt-1.5">
+                Last signed in: {new Date(user.last_login_at).toLocaleString()}
+              </p>
+            )}
           </div>
         </div>
       )}
@@ -182,6 +188,7 @@ export default function AccountPage() {
           <input type="password" required value={next} autoComplete="new-password"
                  onChange={(e) => setNext(e.target.value)}
                  className="w-full rounded border border-line px-3 py-2 text-sm" />
+          <PasswordStrength value={next} />
         </label>
         <label className="block">
           <span className="block text-xs text-ink-soft mb-1">Confirm new password</span>
