@@ -18,7 +18,7 @@ Question types (all auto-gradable, so a sitting scores instantly):
 from datetime import datetime
 
 from sqlalchemy import (
-    Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text,
+    Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -40,6 +40,18 @@ QUESTION_TYPES = (Q_SINGLE, Q_MULTIPLE, Q_BOOLEAN, Q_SHORT)
 # attempt lifecycle
 ATTEMPT_IN_PROGRESS = "in_progress"
 ATTEMPT_SUBMITTED = "submitted"
+
+# difficulty tags for the question bank
+DIFF_EASY = "easy"
+DIFF_MEDIUM = "medium"
+DIFF_HARD = "hard"
+DIFFICULTIES = (DIFF_EASY, DIFF_MEDIUM, DIFF_HARD)
+
+# how an exam sources its questions
+SOURCE_MANUAL = "manual"   # author writes questions directly on the exam
+SOURCE_POOL = "pool"       # each sitting draws a balanced set from the bank
+EXAM_SOURCES = (SOURCE_MANUAL, SOURCE_POOL)
+DEFAULT_DIFFICULTY_RATIO = {"easy": 40, "medium": 40, "hard": 20}
 
 
 class CBTExam(Base, UUIDMixin, TimestampMixin, TenantMixin):
@@ -64,9 +76,19 @@ class CBTExam(Base, UUIDMixin, TimestampMixin, TenantMixin):
     closes_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     shuffle_questions: Mapped[bool] = mapped_column(Boolean, default=True)
+    # randomise the display order of a question's options per sitting
+    shuffle_options: Mapped[bool] = mapped_column(Boolean, default=True)
     # does the student see their score the moment they submit?
     show_results_immediately: Mapped[bool] = mapped_column(Boolean, default=True)
     max_attempts: Mapped[int] = mapped_column(Integer, default=1)
+
+    # question sourcing: "manual" (author's own questions) or "pool" (each
+    # sitting draws a balanced subset from the tenant's question bank)
+    source: Mapped[str] = mapped_column(String(10), default=SOURCE_MANUAL,
+                                        server_default=SOURCE_MANUAL)
+    # pool exams: how many questions to draw, and the difficulty mix (percentages)
+    pool_size: Mapped[int] = mapped_column(Integer, default=0)
+    difficulty_ratio: Mapped[dict] = mapped_column(JSON, default=dict)
 
     # cached on publish so lists/results need not re-sum the questions
     total_marks: Mapped[float] = mapped_column(Float, default=0.0)
@@ -97,6 +119,35 @@ class CBTQuestion(Base, UUIDMixin, TimestampMixin, TenantMixin):
     correct: Mapped[dict | list | str | bool] = mapped_column(JSON, default=dict)
     marks: Mapped[float] = mapped_column(Float, default=1.0)
     sequence: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class CBTBankQuestion(Base, UUIDMixin, TimestampMixin, TenantMixin):
+    """A reusable question in the tenant's bank, tagged by topic and difficulty.
+
+    Same answer-key shape as CBTQuestion. A pool exam draws a balanced subset of
+    these per sitting; the drawn questions are snapshotted onto the attempt, so
+    editing the bank later never changes a sitting already in progress.
+    """
+    __tablename__ = "cbt_bank_questions"
+
+    subject_id: Mapped[str] = mapped_column(ForeignKey("subjects.id"), index=True)
+    # optional narrower scoping — a bank can be organised by term
+    term_id: Mapped[str | None] = mapped_column(ForeignKey("terms.id"))
+    topic: Mapped[str] = mapped_column(String(120), default="")
+    difficulty: Mapped[str] = mapped_column(String(8), default=DIFF_MEDIUM, index=True)
+
+    type: Mapped[str] = mapped_column(String(12), default=Q_SINGLE)
+    text: Mapped[str] = mapped_column(Text, default="")
+    options: Mapped[list] = mapped_column(JSON, default=list)
+    correct: Mapped[dict | list | str | bool] = mapped_column(JSON, default=dict)
+    marks: Mapped[float] = mapped_column(Float, default=1.0)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    __table_args__ = (
+        # the hot path: count/draw by subject + difficulty within one school
+        Index("ix_cbt_bank_school_subject_diff",
+              "school_id", "subject_id", "difficulty"),
+    )
 
 
 class CBTAttempt(Base, UUIDMixin, TimestampMixin, TenantMixin):

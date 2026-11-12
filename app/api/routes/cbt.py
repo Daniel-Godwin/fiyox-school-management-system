@@ -25,15 +25,17 @@ from app.models.student import Student
 from app.models.academics import ClassArm, SchoolClass, Subject
 from app.models.results import AssessmentComponent, ScoreEntry
 from app.models.cbt import (
-    CBTExam, CBTQuestion, CBTAttempt,
+    CBTExam, CBTQuestion, CBTAttempt, CBTBankQuestion,
     EXAM_DRAFT, EXAM_PUBLISHED, EXAM_CLOSED,
     Q_SINGLE, Q_MULTIPLE, Q_BOOLEAN, Q_SHORT, QUESTION_TYPES,
     ATTEMPT_IN_PROGRESS, ATTEMPT_SUBMITTED,
+    DIFFICULTIES, EXAM_SOURCES, SOURCE_MANUAL, SOURCE_POOL,
 )
 from app.schemas import (
     QuestionIn, QuestionOut, ExamIn, ExamPatch, ExamOut, ExamDetailOut, SubmitIn,
+    BankQuestionIn, BankQuestionPatch, BankQuestionOut, BankSummary,
 )
-from app.services.cbt import grade, student_view
+from app.services.cbt import grade, student_view, bank_can_fill, difficulty_counts
 from app.services.teaching import teaches
 from app.services.audit import record_audit
 
@@ -194,6 +196,8 @@ async def create_exam(payload: ExamIn, request: Request, db: DbDep,
     await _validate_component(db, school_id, payload.component_id)
     await _assert_component_free(db, school_id, payload.subject_id,
                                  payload.term_id, payload.component_id, None)
+    if payload.source not in EXAM_SOURCES:
+        raise HTTPException(422, "Question source must be 'manual' or 'pool'")
 
     ex = CBTExam(school_id=school_id, status=EXAM_DRAFT,
                  created_by=user.id, updated_by=user.id,
@@ -263,6 +267,8 @@ async def update_exam(exam_id: str, payload: ExamPatch, db: DbDep,
         await _validate_component(db, school_id, data["component_id"])
         await _assert_component_free(db, school_id, ex.subject_id, ex.term_id,
                                      data["component_id"], exclude_exam_id=ex.id)
+    if data.get("source") and data["source"] not in EXAM_SOURCES:
+        raise HTTPException(422, "Question source must be 'manual' or 'pool'")
     for k, v in data.items():
         setattr(ex, k, v)
     ex.updated_by = user.id
@@ -346,22 +352,57 @@ async def delete_question(exam_id: str, qid: str, db: DbDep,
     await db.commit()
 
 
+async def _bank_counts(db, school_id: str, subject_id: str) -> dict:
+    """Per-difficulty counts (plus overall average marks) of the active bank
+    questions for one subject — used to validate and size a pool exam."""
+    rows = (await db.execute(select(
+        CBTBankQuestion.difficulty, func.count(), func.avg(CBTBankQuestion.marks),
+    ).where(
+        CBTBankQuestion.school_id == school_id,
+        CBTBankQuestion.subject_id == subject_id,
+        CBTBankQuestion.active.is_(True),
+        CBTBankQuestion.deleted_at.is_(None),
+    ).group_by(CBTBankQuestion.difficulty))).all()
+    counts = {d: 0 for d in DIFFICULTIES}
+    n = 0
+    marks_total = 0.0
+    for diff, cnt, avg in rows:
+        if diff in counts:
+            counts[diff] = cnt
+        n += cnt
+        marks_total += float(avg or 0) * cnt
+    counts["avg_marks"] = (marks_total / n) if n else 1.0
+    return counts
+
+
 @router.post("/exams/{exam_id}/publish", response_model=ExamOut)
 async def publish_exam(exam_id: str, request: Request, db: DbDep,
                        user: Annotated[User, AuthorRoles]):
     school_id = tenant_scope(user)
     ex = await _exam(db, school_id, exam_id)
     await _assert_can_manage(db, user, school_id, ex)
-    qs = await _questions(db, school_id, exam_id)
-    if not qs:
-        raise HTTPException(409, "Add at least one question before publishing")
+
+    if ex.source == SOURCE_POOL:
+        counts = await _bank_counts(db, school_id, ex.subject_id)
+        ok, msg = bank_can_fill(counts, ex.pool_size, ex.difficulty_ratio)
+        if not ok:
+            raise HTTPException(409, msg)
+        ex.question_count = ex.pool_size
+        ex.total_marks = round(ex.pool_size * counts["avg_marks"], 2)
+        audit_changes = {"source": "pool", "pool_size": ex.pool_size}
+    else:
+        qs = await _questions(db, school_id, exam_id)
+        if not qs:
+            raise HTTPException(409, "Add at least one question before publishing")
+        ex.total_marks = sum(q.marks for q in qs)
+        ex.question_count = len(qs)
+        audit_changes = {"questions": len(qs), "total_marks": ex.total_marks}
+
     ex.status = EXAM_PUBLISHED
-    ex.total_marks = sum(q.marks for q in qs)
-    ex.question_count = len(qs)
     ex.updated_by = user.id
     await record_audit(db, school_id=school_id, user_id=user.id, action="publish",
                        table_name="cbt_exams", record_id=ex.id,
-                       changes={"questions": len(qs), "total_marks": ex.total_marks},
+                       changes=audit_changes,
                        ip_address=request.client.host if request.client else None)
     await db.commit()
     await db.refresh(ex)
@@ -380,6 +421,102 @@ async def close_exam(exam_id: str, db: DbDep, user: Annotated[User, AuthorRoles]
     await db.refresh(ex)
     subjects, arm_label, components = await _label_maps(db, school_id)
     return _exam_out(ex, subjects, arm_label, components)
+
+
+# ---------- question bank ----------
+async def _bank_question(db, school_id: str, qid: str) -> CBTBankQuestion:
+    q = await db.get(CBTBankQuestion, qid)
+    if q is None or q.school_id != school_id or q.deleted_at is not None:
+        raise HTTPException(404, "Bank question not found")
+    return q
+
+
+async def _assert_subject(db, school_id: str, subject_id: str) -> None:
+    row = await db.get(Subject, subject_id)
+    if row is None or row.school_id != school_id:
+        raise HTTPException(422, "Unknown subject")
+
+
+@router.post("/bank", response_model=BankQuestionOut, status_code=201)
+async def add_bank_question(payload: BankQuestionIn, db: DbDep,
+                            user: Annotated[User, AuthorRoles]):
+    school_id = tenant_scope(user)
+    await _assert_subject(db, school_id, payload.subject_id)
+    if payload.difficulty not in DIFFICULTIES:
+        raise HTTPException(422, "Difficulty must be easy, medium or hard")
+    _validate_question(payload)  # same per-type option/key checks as exam questions
+    q = CBTBankQuestion(school_id=school_id, created_by=user.id, updated_by=user.id,
+                        **payload.model_dump())
+    db.add(q)
+    await db.commit()
+    await db.refresh(q)
+    return q
+
+
+@router.get("/bank", response_model=list[BankQuestionOut])
+async def list_bank_questions(
+    db: DbDep, user: Annotated[User, AuthorRoles],
+    subject_id: str | None = Query(None), difficulty: str | None = Query(None),
+    topic: str | None = Query(None),
+):
+    school_id = tenant_scope(user)
+    stmt = select(CBTBankQuestion).where(
+        CBTBankQuestion.school_id == school_id,
+        CBTBankQuestion.deleted_at.is_(None))
+    if subject_id:
+        stmt = stmt.where(CBTBankQuestion.subject_id == subject_id)
+    if difficulty:
+        stmt = stmt.where(CBTBankQuestion.difficulty == difficulty)
+    if topic:
+        stmt = stmt.where(CBTBankQuestion.topic == topic)
+    rows = (await db.execute(stmt.order_by(CBTBankQuestion.created_at.desc()))).scalars().all()
+    subjects, _arm, _comp = await _label_maps(db, school_id)
+    out = []
+    for q in rows:
+        item = BankQuestionOut.model_validate(q)
+        item.subject_name = subjects.get(q.subject_id)
+        out.append(item)
+    return out
+
+
+@router.get("/bank/summary", response_model=BankSummary)
+async def bank_summary(subject_id: str, db: DbDep,
+                       user: Annotated[User, AuthorRoles]):
+    """Difficulty counts for a subject — drives the balancing UI."""
+    school_id = tenant_scope(user)
+    await _assert_subject(db, school_id, subject_id)
+    counts = await _bank_counts(db, school_id, subject_id)
+    return BankSummary(
+        subject_id=subject_id,
+        easy=counts["easy"], medium=counts["medium"], hard=counts["hard"],
+        total=counts["easy"] + counts["medium"] + counts["hard"])
+
+
+@router.patch("/bank/{qid}", response_model=BankQuestionOut)
+async def update_bank_question(qid: str, payload: BankQuestionPatch, db: DbDep,
+                               user: Annotated[User, AuthorRoles]):
+    school_id = tenant_scope(user)
+    q = await _bank_question(db, school_id, qid)
+    data = payload.model_dump(exclude_unset=True)
+    if data.get("difficulty") and data["difficulty"] not in DIFFICULTIES:
+        raise HTTPException(422, "Difficulty must be easy, medium or hard")
+    for k, v in data.items():
+        setattr(q, k, v)
+    _validate_question(q)  # re-check the merged question is well-formed
+    q.updated_by = user.id
+    await db.commit()
+    await db.refresh(q)
+    return q
+
+
+@router.delete("/bank/{qid}", status_code=204)
+async def delete_bank_question(qid: str, db: DbDep,
+                               user: Annotated[User, AuthorRoles]):
+    school_id = tenant_scope(user)
+    q = await _bank_question(db, school_id, qid)
+    q.deleted_at = _now()
+    q.updated_by = user.id
+    await db.commit()
 
 
 @router.get("/exams/{exam_id}/results")

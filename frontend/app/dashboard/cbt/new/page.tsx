@@ -28,7 +28,12 @@ export default function NewCBT() {
   const [duration, setDuration] = useState(30);
   const [maxAttempts, setMaxAttempts] = useState(1);
   const [shuffle, setShuffle] = useState(true);
+  const [shuffleOptions, setShuffleOptions] = useState(true);
   const [showResults, setShowResults] = useState(true);
+  const [source, setSource] = useState<"manual" | "pool">("manual");
+  const [poolSize, setPoolSize] = useState(25);
+  const [ratio, setRatio] = useState({ easy: 40, medium: 40, hard: 20 });
+  const [bank, setBank] = useState<{ easy: number; medium: number; hard: number; total: number } | null>(null);
   const [instructions, setInstructions] = useState("");
   const [components, setComponents] = useState<Component[]>([]);
   const [componentId, setComponentId] = useState("");
@@ -49,6 +54,29 @@ export default function NewCBT() {
       if (cur) setTermId(cur.id);
     }).catch(() => err("Could not load class lists. Is the backend running?"));
   }, [err]);
+
+  // live bank counts for the chosen subject (pool mode only)
+  useEffect(() => {
+    if (source !== "pool" || !subjectId) { setBank(null); return; }
+    api<{ easy: number; medium: number; hard: number; total: number }>(
+      `/api/cbt/bank/summary?subject_id=${subjectId}`).then(setBank).catch(() => setBank(null));
+  }, [source, subjectId]);
+
+  // target counts per difficulty, mirroring the backend's largest-remainder split
+  const want = useMemo(() => {
+    const total = (ratio.easy + ratio.medium + ratio.hard) || 1;
+    const raw = {
+      easy: (poolSize * ratio.easy) / total,
+      medium: (poolSize * ratio.medium) / total,
+      hard: (poolSize * ratio.hard) / total,
+    };
+    const base = { easy: Math.floor(raw.easy), medium: Math.floor(raw.medium), hard: Math.floor(raw.hard) };
+    let rem = poolSize - base.easy - base.medium - base.hard;
+    const diffs: ("easy" | "medium" | "hard")[] = ["easy", "medium", "hard"];
+    diffs.sort((a, b) => (raw[b] - base[b]) - (raw[a] - base[a]))
+      .forEach((d) => { if (rem-- > 0) base[d]++; });
+    return base;
+  }, [poolSize, ratio]);
 
   const isTeacher = role === "teacher";
   // a teacher may only set tests for pairs they teach
@@ -71,9 +99,13 @@ export default function NewCBT() {
         body: JSON.stringify({
           title: title.trim(), subject_id: subjectId, arm_id: armId, term_id: termId,
           duration_minutes: Number(duration), max_attempts: Number(maxAttempts),
-          shuffle_questions: shuffle, show_results_immediately: showResults,
+          shuffle_questions: shuffle, shuffle_options: shuffleOptions,
+          show_results_immediately: showResults,
           instructions: instructions.trim(),
           component_id: componentId || null,
+          source,
+          pool_size: source === "pool" ? Number(poolSize) : 0,
+          difficulty_ratio: source === "pool" ? ratio : {},
         }),
       });
       router.push(`/dashboard/cbt/${exam.id}`);
@@ -168,10 +200,64 @@ export default function NewCBT() {
                     placeholder="Shown to students before they begin." />
         </div>
 
+        {/* question source: author's own, or a balanced draw from the bank */}
+        <div className="rounded-lg border border-line p-4 space-y-3">
+          <label className={label}>Questions</label>
+          <div className="grid sm:grid-cols-2 gap-2">
+            <button type="button" onClick={() => setSource("manual")}
+                    className={`rounded-md border px-3 py-2 text-sm text-left ${source === "manual" ? "border-ink bg-paper" : "border-line"}`}>
+              <div className="font-medium">Write my own</div>
+              <div className="text-xs text-ink-soft">Author the questions on the next screen.</div>
+            </button>
+            <button type="button" onClick={() => setSource("pool")}
+                    className={`rounded-md border px-3 py-2 text-sm text-left ${source === "pool" ? "border-ink bg-paper" : "border-line"}`}>
+              <div className="font-medium">Draw from the bank</div>
+              <div className="text-xs text-ink-soft">Each student gets a unique balanced set.</div>
+            </button>
+          </div>
+
+          {source === "pool" && (
+            <div className="space-y-3 pt-1">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div>
+                  <label className="block text-xs text-ink-soft mb-1">Questions per student</label>
+                  <input type="number" min={1} className={field} value={poolSize}
+                         onChange={(e) => setPoolSize(Number(e.target.value))} />
+                </div>
+                {(["easy", "medium", "hard"] as const).map((d) => (
+                  <div key={d}>
+                    <label className="block text-xs text-ink-soft mb-1 capitalize">{d} %</label>
+                    <input type="number" min={0} max={100} className={field} value={ratio[d]}
+                           onChange={(e) => setRatio({ ...ratio, [d]: Number(e.target.value) })} />
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-ink-soft">
+                Needs <strong>{want.easy}</strong> easy · <strong>{want.medium}</strong> medium · <strong>{want.hard}</strong> hard
+                {bank !== null && (
+                  <> — bank has {bank.easy} · {bank.medium} · {bank.hard} ({bank.total} total){" "}
+                    {(bank.easy >= want.easy && bank.medium >= want.medium && bank.hard >= want.hard)
+                      ? <span className="text-ledger">✓ enough</span>
+                      : <span className="text-sanction">— add more before publishing</span>}
+                  </>
+                )}
+                {!subjectId && " — pick a subject to check the bank."}
+              </p>
+              <a href="/dashboard/cbt/bank" className="text-xs text-ink underline underline-offset-2">
+                Manage question bank →
+              </a>
+            </div>
+          )}
+        </div>
+
         <div className="flex flex-col gap-2 pt-1">
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={shuffle} onChange={(e) => setShuffle(e.target.checked)} />
             Shuffle question order for each student
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={shuffleOptions} onChange={(e) => setShuffleOptions(e.target.checked)} />
+            Shuffle the answer options for each student
           </label>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={showResults} onChange={(e) => setShowResults(e.target.checked)} />
