@@ -2,7 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
-import { login, ApiError } from "@/lib/api";
+import { login, verifyTwoFactor, ApiError } from "@/lib/api";
 import FiyoxLoader from "@/components/FiyoxLoader";
 
 export default function LoginPage() {
@@ -12,13 +12,34 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // second factor
+  const [challenge, setChallenge] = useState<string | null>(null);
+  const [code, setCode] = useState("");
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setBusy(true);
     try {
-      await login(email.trim().toLowerCase(), password);
+      const r = await login(email.trim().toLowerCase(), password);
+      if (r.twoFactor) {
+        setChallenge(r.challenge);
+        setBusy(false);
+        return;
+      }
+      router.replace("/dashboard");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not reach the server");
+      setBusy(false);
+    }
+  }
+
+  async function onVerify(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      await verifyTwoFactor(challenge!, code.trim());
       router.replace("/dashboard");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not reach the server");
@@ -42,6 +63,36 @@ export default function LoginPage() {
         </div>
 
         {/* ruled page */}
+        {challenge ? (
+          <form
+            onSubmit={onVerify}
+            className="bg-card register-rules rounded-b-xl border border-line border-t-0 px-6 py-7 space-y-5 shadow-sm"
+          >
+            <p className="text-sm text-ink-soft">
+              We emailed a 6-digit sign-in code to{" "}
+              <span className="font-medium text-ink break-all">{email}</span>.
+              Enter it to finish signing in.
+            </p>
+            <div>
+              <label htmlFor="code" className="block text-xs font-medium text-ink-soft mb-1">
+                Sign-in code
+              </label>
+              <input id="code" inputMode="numeric" maxLength={6} required
+                     value={code} onChange={(e) => setCode(e.target.value)}
+                     className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm tracking-widest text-center" />
+            </div>
+            {error && <p role="alert" className="text-sanction text-sm">{error}</p>}
+            <button type="submit" disabled={busy}
+                    className="w-full rounded-md bg-ink text-white py-2.5 text-sm font-medium hover:bg-ink-soft disabled:opacity-70 flex items-center justify-center gap-2">
+              {busy ? (<><FiyoxLoader size={18} tone="dark" /> Verifying…</>) : "Verify & sign in"}
+            </button>
+            <button type="button"
+                    onClick={() => { setChallenge(null); setCode(""); setError(null); }}
+                    className="w-full text-xs text-ink-soft hover:text-ink underline underline-offset-2">
+              Back
+            </button>
+          </form>
+        ) : (
         <form
           onSubmit={onSubmit}
           className="bg-card register-rules rounded-b-xl border border-line border-t-0 px-6 py-7 space-y-5 shadow-sm"
@@ -111,10 +162,13 @@ export default function LoginPage() {
             {busy ? (<><FiyoxLoader size={18} tone="dark" /> Signing in…</>) : "Sign in"}
           </button>
         </form>
+        )}
 
-        <p className="text-center text-xs text-ink-soft/70 mt-4">
-          Your school admin creates accounts. Use “Forgot password?” to reset yours by email.
-        </p>
+        {!challenge && (
+          <p className="text-center text-xs text-ink-soft/70 mt-4">
+            Your school admin creates accounts. Use “Forgot password?” to reset yours by email.
+          </p>
+        )}
       </div>
     </main>
   );

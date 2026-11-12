@@ -28,3 +28,4 @@ class UserOut(BaseModel):
     email_verified: bool = False
     must_change_password: bool = False
     last_login_at: datetime | None = None
+    two_factor_enabled: bool = False

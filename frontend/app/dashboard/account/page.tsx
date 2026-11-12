@@ -26,6 +26,26 @@ export default function AccountPage() {
     api<Availability>("/api/verify/availability").then(setAvail).catch(() => {});
   }, []);
 
+  // --- two-factor ---
+  const [tfaBusy, setTfaBusy] = useState(false);
+  const [tfaNotice, setTfaNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  async function toggleTwoFactor(enable: boolean) {
+    setTfaBusy(true); setTfaNotice(null);
+    try {
+      await api(`/api/auth/2fa/${enable ? "enable" : "disable"}`, { method: "POST" });
+      setUser((u) => (u ? { ...u, two_factor_enabled: enable } : u));
+      setTfaNotice({
+        kind: "ok",
+        text: enable
+          ? "Two-factor sign-in is on. You'll enter an emailed code at each login."
+          : "Two-factor sign-in is off.",
+      });
+    } catch (e) {
+      setTfaNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not update two-factor." });
+    } finally { setTfaBusy(false); }
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (next.length < 8) {
@@ -169,6 +189,51 @@ export default function AccountPage() {
           {vNotice && (
             <p role="status" className={`text-sm ${vNotice.kind === "ok" ? "text-ledger" : "text-sanction"}`}>
               {vNotice.text}
+            </p>
+          )}
+        </section>
+      )}
+
+      {/* ---- two-factor authentication ---- */}
+      {user && user.role !== "super_admin" && (
+        <section className="rounded-lg border border-line bg-card p-4 space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium">Two-factor sign-in</p>
+              <p className="text-sm text-ink-soft mt-0.5">
+                Adds a one-time code, emailed at each login, on top of your password.
+              </p>
+            </div>
+            {user.two_factor_enabled ? (
+              <span className="shrink-0 inline-flex items-center gap-1.5 rounded-full bg-ledger/10 text-ledger px-3 py-1 text-xs font-medium">
+                <span className="h-1.5 w-1.5 rounded-full bg-ledger" /> On
+              </span>
+            ) : (
+              <span className="shrink-0 inline-flex items-center gap-1.5 rounded-full bg-line text-ink-soft px-3 py-1 text-xs font-medium">
+                <span className="h-1.5 w-1.5 rounded-full bg-ink-soft/50" /> Off
+              </span>
+            )}
+          </div>
+
+          {!user.email_verified ? (
+            <p className="text-xs text-ink-soft border border-dashed border-line rounded-md p-3">
+              Verify your email above first — two-factor codes are sent there.
+            </p>
+          ) : user.two_factor_enabled ? (
+            <button onClick={() => toggleTwoFactor(false)} disabled={tfaBusy}
+                    className="rounded-md border border-line px-4 py-2 text-sm font-medium hover:bg-paper disabled:opacity-50">
+              {tfaBusy ? "Saving…" : "Turn off"}
+            </button>
+          ) : (
+            <button onClick={() => toggleTwoFactor(true)} disabled={tfaBusy}
+                    className="rounded-md bg-ink text-white px-4 py-2 text-sm font-medium hover:bg-ink-soft disabled:opacity-50">
+              {tfaBusy ? "Saving…" : "Turn on two-factor"}
+            </button>
+          )}
+
+          {tfaNotice && (
+            <p role="status" className={`text-sm ${tfaNotice.kind === "ok" ? "text-ledger" : "text-sanction"}`}>
+              {tfaNotice.text}
             </p>
           )}
         </section>

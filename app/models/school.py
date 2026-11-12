@@ -105,3 +105,6 @@ class User(Base, UUIDMixin, TimestampMixin):
     # updated on each successful login, surfaced on the Account page
     last_login_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), default=None, nullable=True)
+    # opt-in two-factor: when on, login emails a one-time code as a second step
+    two_factor_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false(), nullable=False)
