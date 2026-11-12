@@ -14,6 +14,7 @@ export type User = {
   email_verified?: boolean;
   must_change_password?: boolean;
   last_login_at?: string | null;
+  two_factor_enabled?: boolean;
 };
 
 export function getToken(): string | null {
@@ -60,8 +61,14 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-/** Login uses OAuth2 form encoding (username = email), per the backend. */
-export async function login(email: string, password: string): Promise<string> {
+export type LoginResult =
+  | { twoFactor: false }
+  | { twoFactor: true; challenge: string };
+
+/** Login uses OAuth2 form encoding (username = email), per the backend.
+ * If the account has 2FA on, no token is set — the caller must collect the
+ * emailed code and call verifyTwoFactor with the returned challenge. */
+export async function login(email: string, password: string): Promise<LoginResult> {
   const body = new URLSearchParams({ username: email, password });
   const res = await fetch(`${API}/api/auth/login`, {
     method: "POST",
@@ -72,9 +79,29 @@ export async function login(email: string, password: string): Promise<string> {
     const data = await res.json().catch(() => ({ detail: "Login failed" }));
     throw new ApiError(res.status, data.detail ?? "Login failed");
   }
+  const data = (await res.json()) as
+    | { access_token: string; token_type: string }
+    | { two_factor_required: true; challenge: string };
+  if ("two_factor_required" in data && data.two_factor_required) {
+    return { twoFactor: true, challenge: data.challenge };
+  }
+  setToken((data as { access_token: string }).access_token);
+  return { twoFactor: false };
+}
+
+/** Second step of a 2FA login: exchange the emailed code for a token. */
+export async function verifyTwoFactor(challenge: string, code: string): Promise<void> {
+  const res = await fetch(`${API}/api/auth/login/2fa`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ challenge, code }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ detail: "Verification failed" }));
+    throw new ApiError(res.status, data.detail ?? "Verification failed");
+  }
   const data = (await res.json()) as { access_token: string };
   setToken(data.access_token);
-  return data.access_token;
 }
 
 export function me(): Promise<User> {

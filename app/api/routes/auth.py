@@ -13,6 +13,7 @@ from sqlalchemy import select, func
 from app.core.deps import DbDep, CurrentUser
 from app.core.security import (
     create_access_token, hash_password, verify_password, weak_password_reason,
+    create_2fa_challenge, decode_2fa_challenge,
 )
 from app.models.school import User, Role, School
 from app.models.notifications import MessagePurpose
@@ -26,6 +27,10 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 RESET_TTL_MINUTES = 15        # a reset code is valid for this long
 RESET_MAX_PER_HOUR = 5        # reset codes per account per hour
 RESET_MAX_ATTEMPTS = 5        # wrong code entries before the code is dead
+
+# --- two-factor sign-in codes ----------------------------------------------
+LOGIN_OTP_TTL_MINUTES = 10
+LOGIN_OTP_MAX_ATTEMPTS = 5
 
 
 def _hash(code: str) -> str:
@@ -63,7 +68,35 @@ def _clear_login_failures(email: str) -> None:
     _LOGIN_FAILURES.pop(email, None)
 
 
-@router.post("/login", response_model=Token)
+async def _issue_token(db, user: User) -> dict:
+    """Complete a sign-in: stamp last_login_at and return a bearer token."""
+    user.last_login_at = datetime.now(timezone.utc)
+    await db.commit()
+    role_val = user.role.value if isinstance(user.role, Role) else user.role
+    return {"access_token": create_access_token(user.id, user.school_id, role_val),
+            "token_type": "bearer"}
+
+
+async def _send_login_code(db, user: User) -> None:
+    """Email a one-time sign-in code (second factor). Caller commits."""
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    db.add(VerificationCode(
+        school_id=user.school_id, user_id=user.id, channel=VerifyChannel.EMAIL,
+        purpose=VerifyPurpose.LOGIN_OTP, contact=user.email,
+        code_hash=_hash(code),
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=LOGIN_OTP_TTL_MINUTES),
+        created_by=user.id))
+    await send_email_and_log(
+        db, school_id=user.school_id, to=user.email,
+        subject="Your Fiyox sign-in code",
+        body=(f"Your Fiyox sign-in code is {code}.\n\n"
+              f"It expires in {LOGIN_OTP_TTL_MINUTES} minutes. If this wasn't you, "
+              f"someone may have your password — change it after signing in."),
+        purpose=MessagePurpose.ANNOUNCEMENT,
+        recipient_user_id=user.id, created_by=user.id)
+
+
+@router.post("/login")
 async def login(form: Annotated[OAuth2PasswordRequestForm, Depends()], db: DbDep):
     # OAuth2 form uses 'username'; we treat it as email. Emails are globally
     # unique, but historic/offboarded data could still leave more than one row
@@ -117,12 +150,16 @@ async def login(form: Annotated[OAuth2PasswordRequestForm, Depends()], db: DbDep
         raise HTTPException(status_code=409,
                             detail="This email is linked to more than one active account — contact support")
 
-    _clear_login_failures(email)
-    user.last_login_at = datetime.now(timezone.utc)
-    await db.commit()
-    role_val = user.role.value if isinstance(user.role, Role) else user.role
-    token = create_access_token(user.id, user.school_id, role_val)
-    return Token(access_token=token)
+    _clear_login_failures(email)  # the password was correct
+
+    # second factor, if the user opted in: email a code and hand back a
+    # short-lived challenge instead of a usable token
+    if user.two_factor_enabled and user.email and user.school_id is not None:
+        await _send_login_code(db, user)
+        await db.commit()
+        return {"two_factor_required": True, "challenge": create_2fa_challenge(user.id)}
+
+    return await _issue_token(db, user)
 
 
 @router.post("/change-password")
@@ -250,6 +287,75 @@ async def reset_password(payload: ResetPasswordIn, db: DbDep):
     await db.commit()
     _clear_login_failures(email)  # a successful reset lifts any login lockout
     return {"reset": True}
+
+
+# --- two-factor authentication ---------------------------------------------
+class TwoFactorLoginIn(BaseModel):
+    challenge: str
+    code: str
+
+
+@router.post("/login/2fa")
+async def login_2fa(payload: TwoFactorLoginIn, db: DbDep):
+    """Second step of a 2FA login: exchange the emailed code for a token."""
+    bad = HTTPException(status_code=401,
+                        detail="Your sign-in session expired — please start again")
+    uid = decode_2fa_challenge(payload.challenge)
+    if not uid:
+        raise bad
+    user = await db.get(User, uid)
+    if not user or not user.is_active or user.deleted_at is not None:
+        raise bad
+
+    vc = (await db.execute(select(VerificationCode).where(
+        VerificationCode.user_id == user.id,
+        VerificationCode.purpose == VerifyPurpose.LOGIN_OTP,
+        VerificationCode.used == False)  # noqa: E712
+        .order_by(VerificationCode.created_at.desc()))).scalars().first()
+    if not vc:
+        raise HTTPException(status_code=400,
+                            detail="No sign-in code is waiting — please start again")
+    now = datetime.now(timezone.utc)
+    expires = vc.expires_at if vc.expires_at.tzinfo else vc.expires_at.replace(tzinfo=timezone.utc)
+    if now > expires:
+        raise HTTPException(status_code=400,
+                            detail="That code has expired — please start again")
+    if vc.attempts >= LOGIN_OTP_MAX_ATTEMPTS:
+        raise HTTPException(status_code=429,
+                            detail="Too many wrong codes — please start again")
+    if _hash(payload.code.strip()) != vc.code_hash:
+        vc.attempts += 1
+        await db.commit()
+        raise HTTPException(status_code=400, detail="Wrong code — check your email")
+
+    vc.used = True
+    return await _issue_token(db, user)
+
+
+@router.post("/2fa/enable")
+async def enable_2fa(db: DbDep, user: CurrentUser):
+    """Turn on two-factor sign-in for the caller's own account."""
+    fresh = await db.get(User, user.id)
+    if fresh.school_id is None:
+        raise HTTPException(status_code=400,
+                            detail="Two-factor sign-in isn't available for this account.")
+    if not fresh.email:
+        raise HTTPException(status_code=400,
+                            detail="Add an email to your account first.")
+    if not fresh.email_verified:
+        raise HTTPException(status_code=400,
+                            detail="Verify your email first — sign-in codes are sent there.")
+    fresh.two_factor_enabled = True
+    await db.commit()
+    return {"two_factor_enabled": True}
+
+
+@router.post("/2fa/disable")
+async def disable_2fa(db: DbDep, user: CurrentUser):
+    fresh = await db.get(User, user.id)
+    fresh.two_factor_enabled = False
+    await db.commit()
+    return {"two_factor_enabled": False}
 
 
 @router.get("/me", response_model=UserOut)

@@ -58,3 +58,23 @@ def create_access_token(subject: str, school_id: str | None, role: str) -> str:
 
 def decode_access_token(token: str) -> dict:
     return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+
+
+def create_2fa_challenge(user_id: str) -> str:
+    """A short-lived token issued after a correct password when 2FA is on. It is
+    NOT a usable access token — it only lets the holder submit the emailed code."""
+    now = datetime.now(timezone.utc)
+    payload = {"sub": user_id, "purpose": "2fa", "iat": now,
+               "exp": now + timedelta(minutes=10)}
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
+
+def decode_2fa_challenge(token: str) -> str | None:
+    """Return the user id from a 2FA challenge token, or None if invalid."""
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+    except Exception:
+        return None
+    if payload.get("purpose") != "2fa":
+        return None
+    return payload.get("sub")
