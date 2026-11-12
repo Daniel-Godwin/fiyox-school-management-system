@@ -115,3 +115,35 @@ async def test_debtors_is_finance_only(ctx):
     th = await headers(client, "teacher@gss-ikeja.ng", "teach123")
     assert (await client.get("/api/fees/debtors", headers=th)).status_code == 403
     assert (await client.get("/api/fees/debtors.xlsx", headers=th)).status_code == 403
+
+
+async def test_remind_debtors_emails_parents(ctx):
+    client, ids = ctx
+    ah = await headers(client, "admin@gss-ikeja.ng", "admin123")
+    await _bill(client, ah, ids, amount=50000)
+
+    # give the first student a parent with an email
+    from app.core.security import hash_password
+    from app.models.school import Role, User
+    from app.models.student import Guardian
+    sid = ids["student_ids"][0]
+    async with ids["session_factory"]() as db:
+        p = User(school_id=ids["school_id"], email="parent1@x.ng",
+                 hashed_password=hash_password("par12345"), role=Role.PARENT,
+                 first_name="Mama", last_name="Ali", phone="08030000001")
+        db.add(p)
+        await db.flush()
+        db.add(Guardian(school_id=ids["school_id"], parent_user_id=p.id, student_id=sid))
+        await db.commit()
+
+    r = (await client.post("/api/fees/debtors/remind", headers=ah, json={})).json()
+    assert r["sent"] >= 1
+    assert r["skipped_no_email"] >= 1  # other debtors have no parent email on file
+
+    # the reminder was logged to that parent
+    from sqlalchemy import select
+    from app.models.notifications import MessageLog
+    async with ids["session_factory"]() as db:
+        logs = (await db.execute(select(MessageLog).where(
+            MessageLog.recipient == "parent1@x.ng"))).scalars().all()
+    assert logs and "outstanding" in logs[0].body.lower()
