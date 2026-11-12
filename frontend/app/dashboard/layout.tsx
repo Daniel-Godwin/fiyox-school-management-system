@@ -93,6 +93,28 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return () => { document.body.style.overflow = prev; };
   }, [menuOpen]);
 
+  // idle auto-logout: schools often share a computer, so sign out after a spell
+  // of no activity to protect whoever's data is on screen
+  useEffect(() => {
+    if (!user) return;
+    const IDLE_MS = 30 * 60 * 1000; // 30 minutes
+    let timer: ReturnType<typeof setTimeout>;
+    const reset = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        clearToken();
+        router.replace("/login");
+      }, IDLE_MS);
+    };
+    const events = ["mousemove", "mousedown", "keydown", "touchstart", "scroll"];
+    events.forEach((e) => window.addEventListener(e, reset, { passive: true }));
+    reset();
+    return () => {
+      clearTimeout(timer);
+      events.forEach((e) => window.removeEventListener(e, reset));
+    };
+  }, [user, router]);
+
   if (!user) {
     return <FiyoxLoader fullScreen label="Loading your workspace…" />;
   }

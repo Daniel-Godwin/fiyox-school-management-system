@@ -14,6 +14,32 @@ def verify_password(raw: str, hashed: str) -> bool:
     return bcrypt.checkpw(raw.encode()[:72], hashed.encode())
 
 
+# A short list of obviously-guessable passwords to refuse outright. This is a
+# floor, not a full policy — length plus "not on this list" already rules out
+# the passwords attackers try first.
+_COMMON_WEAK = {
+    "password", "password1", "password123", "12345678", "123456789",
+    "1234567890", "qwerty123", "qwertyuiop", "11111111", "00000000",
+    "abc12345", "iloveyou", "admin123", "letmein1", "fiyox2026", "changeme",
+}
+
+
+def weak_password_reason(raw: str) -> str | None:
+    """Return a human reason if the password is too weak, else None.
+
+    Length (>= 8) is enforced by the schema; this adds cheap extra guards that a
+    length check alone misses: all-identical characters and common passwords.
+    """
+    pw = raw.strip()
+    if len(pw) < 8:
+        return "Password must be at least 8 characters."
+    if len(set(pw)) == 1:
+        return "Password is too simple — use a mix of characters."
+    if pw.lower() in _COMMON_WEAK:
+        return "That password is too common — choose something harder to guess."
+    return None
+
+
 def create_access_token(subject: str, school_id: str | None, role: str) -> str:
     """Encode user id, tenant (school) and role directly into the token.
 

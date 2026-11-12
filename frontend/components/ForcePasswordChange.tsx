@@ -4,6 +4,7 @@ import { FormEvent, useState } from "react";
 import { api, ApiError, clearToken } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import FiyoxLoader from "./FiyoxLoader";
+import PasswordStrength from "./PasswordStrength";
 
 /**
  * Hard gate shown across the whole dashboard while a user is still on an
@@ -62,7 +63,7 @@ export default function ForcePasswordChange({ onDone }: { onDone: () => void }) 
           <input type="password" required autoComplete="new-password" value={next}
                  onChange={(e) => setNext(e.target.value)}
                  className="w-full rounded border border-line px-3 py-2 text-sm" />
-          <span className="block text-[11px] text-ink-soft/70 mt-1">At least 8 characters.</span>
+          <PasswordStrength value={next} />
         </label>
         <label className="block">
           <span className="block text-xs text-ink-soft mb-1">Confirm new password</span>

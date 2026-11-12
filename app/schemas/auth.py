@@ -1,4 +1,5 @@
 """Auth & identity schemas."""
+from datetime import datetime
 from pydantic import BaseModel, EmailStr, ConfigDict
 from app.models.school import Role
 
@@ -26,3 +27,4 @@ class UserOut(BaseModel):
     phone_verified: bool = False
     email_verified: bool = False
     must_change_password: bool = False
+    last_login_at: datetime | None = None

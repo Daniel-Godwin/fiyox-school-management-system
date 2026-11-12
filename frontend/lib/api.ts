@@ -13,6 +13,7 @@ export type User = {
   phone_verified?: boolean;
   email_verified?: boolean;
   must_change_password?: boolean;
+  last_login_at?: string | null;
 };
 
 export function getToken(): string | null {

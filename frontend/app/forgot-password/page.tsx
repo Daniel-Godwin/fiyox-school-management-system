@@ -4,6 +4,7 @@ import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
 import FiyoxLoader from "@/components/FiyoxLoader";
+import PasswordStrength from "@/components/PasswordStrength";
 
 type Stage = "request" | "reset" | "done";
 
@@ -102,7 +103,7 @@ export default function ForgotPasswordPage() {
                 <input id="new" type="password" required autoComplete="new-password" value={next}
                        onChange={(e) => setNext(e.target.value)}
                        className="w-full rounded-md border border-line bg-white px-3 py-2 text-sm" />
-                <p className="text-[11px] text-ink-soft/70 mt-1">At least 8 characters.</p>
+                <PasswordStrength value={next} />
               </div>
               <div>
                 <label htmlFor="confirm" className="block text-xs font-medium text-ink-soft mb-1">Confirm new password</label>
