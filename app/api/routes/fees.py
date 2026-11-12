@@ -3,11 +3,14 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from io import BytesIO
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from app.core.config import settings
 from app.core.deps import DbDep, require_roles, tenant_scope
 from app.models.school import School, User, Role
+from app.models.notifications import MessagePurpose
 from app.models.student import Student
+from app.services.notify import send_email_and_log
 from app.models.fees import (
     FeeCategory, FeeStructure, Invoice, Payment, InvoiceStatus,
 )
@@ -956,6 +959,8 @@ async def _debtor_rows(db, school_id: str, term_id: str | None, arm_id: str | No
         g = by_student_guardian.get(r["student_id"])
         r["guardian_name"] = f"{g.first_name} {g.last_name}" if g else ""
         r["guardian_phone"] = (g.phone if g else "") or ""
+        r["guardian_email"] = (g.email if g else "") or ""
+        r["guardian_user_id"] = g.id if g else None
         r["terms_owing"] = len(r["terms"])
         rows.append(r)
 
@@ -979,6 +984,53 @@ async def list_debtors(
         "total_outstanding": round(sum(r["outstanding"] for r in rows), 2),
         "debtors": rows,
     }
+
+
+class RemindDebtorsIn(BaseModel):
+    term_id: str | None = None
+    arm_id: str | None = None
+
+
+@router.post("/debtors/remind")
+async def remind_debtors(
+    payload: RemindDebtorsIn, request: Request, db: DbDep,
+    user: Annotated[User, FinanceView],
+):
+    """Email every debtor's parent/guardian a fees reminder. Each message is
+    logged in the delivery log. Debtors whose parent has no email on file are
+    skipped and reported back, never silently dropped."""
+    school_id = tenant_scope(user)
+    school = await db.get(School, school_id)
+    rows = await _debtor_rows(db, school_id, payload.term_id, payload.arm_id)
+
+    sent = skipped = 0
+    for r in rows:
+        email = r.get("guardian_email")
+        if not email:
+            skipped += 1
+            continue
+        who = r.get("guardian_name") or "Parent/Guardian"
+        body = (
+            f"Dear {who},\n\n"
+            f"This is a reminder from {school.name if school else 'the school'} "
+            f"that {r['name']} (Admission No. {r['admission_number']}) has an "
+            f"outstanding school fees balance of NGN {r['outstanding']:,.2f}.\n\n"
+            f"Kindly arrange payment at your earliest convenience. If you have "
+            f"already paid, please disregard this message.\n\nThank you."
+        )
+        await send_email_and_log(
+            db, school_id=school_id, to=email,
+            subject=f"School fees reminder — {r['name']}",
+            body=body, purpose=MessagePurpose.ANNOUNCEMENT,
+            recipient_user_id=r.get("guardian_user_id"), created_by=user.id)
+        sent += 1
+
+    await db.commit()
+    note = f"Sent {sent} reminder(s) by email."
+    if skipped:
+        note += f" {skipped} debtor(s) have no parent email on file and were skipped."
+    return {"sent": sent, "skipped_no_email": skipped,
+            "debtors": len(rows), "note": note}
 
 
 @router.get("/debtors.xlsx")

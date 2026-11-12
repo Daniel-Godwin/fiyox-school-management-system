@@ -447,6 +447,25 @@ export default function FeesPage() {
     } finally { setBusy(null); }
   }
 
+  async function remindDebtors() {
+    const scope = debtorArm ? "this class" : "all classes";
+    if (!window.confirm(`Email a fees reminder to the parents of every debtor in ${scope}? Parents without an email on file are skipped.`)) return;
+    setBusy("debtors-remind"); setNotice(null);
+    try {
+      const r = await api<{ sent: number; skipped_no_email: number; note: string }>(
+        `/api/fees/debtors/remind`, {
+          method: "POST",
+          body: JSON.stringify({
+            arm_id: debtorArm || null,
+            term_id: debtorTermScope === "current" && termId ? termId : null,
+          }),
+        });
+      setNotice({ kind: r.sent > 0 ? "ok" : "err", text: r.note });
+    } catch (e) {
+      setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not send reminders." });
+    } finally { setBusy(null); }
+  }
+
   async function loadRecon() {
     setReconBusy(true);
     try {
@@ -887,6 +906,12 @@ export default function FeesPage() {
             <button onClick={downloadDebtors} disabled={busy !== null}
                     className="rounded-md border border-line px-4 py-2 text-sm font-medium hover:border-ink disabled:opacity-40">
               {busy === "debtors-xlsx" ? "Preparing…" : "Download Excel"}
+            </button>
+          )}
+          {debtors && debtors.count > 0 && (
+            <button onClick={remindDebtors} disabled={busy !== null}
+                    className="rounded-md bg-ledger text-white px-4 py-2 text-sm font-medium hover:opacity-90 disabled:opacity-40">
+              {busy === "debtors-remind" ? "Sending…" : "Email reminders"}
             </button>
           )}
           {debtors && (
