@@ -275,14 +275,14 @@ export default function CBTBuilder() {
       </div>
 
       <header className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">{exam.title}</h1>
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold break-words">{exam.title}</h1>
           <p className="text-ink-soft text-sm mt-1">
             {exam.subject_name ?? "—"} · {exam.class_label ?? "—"} · {exam.duration_minutes} min ·
             {" "}{exam.question_count} questions · {exam.total_marks} marks
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {exam.status === "published" && (
             <Link href={`/dashboard/cbt/${id}/monitor`}
                   className="rounded-md border border-ink text-ink px-4 py-2 text-sm font-medium hover:bg-ink hover:text-white">

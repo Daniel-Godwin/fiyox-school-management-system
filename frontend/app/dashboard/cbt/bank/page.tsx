@@ -41,6 +41,7 @@ export default function QuestionBank() {
   const [multi, setMulti] = useState<string[]>([]);
   const [boolAns, setBoolAns] = useState(true);
   const [shortAns, setShortAns] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   useEffect(() => {
     api<Subject[]>("/api/academics/subjects").then(setSubjects).catch(() => {});
@@ -59,7 +60,8 @@ export default function QuestionBank() {
   useEffect(() => { load().catch(() => {}); }, [load]);
 
   function reset() {
-    setText(""); setTopic(""); setMarks(1); setDifficulty("medium");
+    setEditingId(null);
+    setText(""); setTopic(""); setMarks(1); setDifficulty("medium"); setType("single");
     setOptions([{ id: "a", text: "" }, { id: "b", text: "" }]);
     setSingle("a"); setMulti([]); setBoolAns(true); setShortAns("");
   }
@@ -71,7 +73,21 @@ export default function QuestionBank() {
     return shortAns.split(",").map((s) => s.trim()).filter(Boolean);
   }
 
-  async function add() {
+  // load an existing question into the form for editing
+  function startEdit(q: BankQ) {
+    setEditingId(q.id);
+    setType(q.type); setText(q.text); setTopic(q.topic);
+    setDifficulty(q.difficulty); setMarks(q.marks);
+    setOptions(q.options.length ? q.options.map((o) => ({ id: o.id, text: o.text }))
+                                : [{ id: "a", text: "" }, { id: "b", text: "" }]);
+    setSingle(q.type === "single" && typeof q.correct === "string" ? q.correct : "a");
+    setMulti(q.type === "multiple" && Array.isArray(q.correct) ? (q.correct as string[]) : []);
+    setBoolAns(q.type === "boolean" ? q.correct === true : true);
+    setShortAns(q.type === "short" && Array.isArray(q.correct) ? (q.correct as string[]).join(", ") : "");
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function submit() {
     if (!subjectId) return err("Choose a subject first");
     if (!text.trim()) return err("Write the question");
     const body: Record<string, unknown> = {
@@ -82,21 +98,28 @@ export default function QuestionBank() {
     };
     setSaving(true);
     try {
-      await api("/api/cbt/bank", { method: "POST", body: JSON.stringify(body) });
-      ok("Added to the bank");
+      if (editingId) {
+        await api(`/api/cbt/bank/${editingId}`, { method: "PATCH", body: JSON.stringify(body) });
+        ok("Question updated");
+      } else {
+        await api("/api/cbt/bank", { method: "POST", body: JSON.stringify(body) });
+        ok("Added to the bank");
+      }
       reset();
       await load();
     } catch (e) {
-      err(e instanceof ApiError ? e.message : "Could not add the question");
+      err(e instanceof ApiError ? e.message : "Could not save the question");
     } finally { setSaving(false); }
   }
 
   async function remove(id: string) {
-    if (!confirm("Remove this question from the bank?")) return;
+    if (!confirm("Delete this question from the bank? This cannot be undone.")) return;
     try {
       await api(`/api/cbt/bank/${id}`, { method: "DELETE" });
+      if (editingId === id) reset();
+      ok("Question deleted");
       await load();
-    } catch (e) { err(e instanceof ApiError ? e.message : "Could not remove it"); }
+    } catch (e) { err(e instanceof ApiError ? e.message : "Could not delete it"); }
   }
 
   const field = "w-full rounded-md border border-line bg-white px-3 py-2 text-sm";
@@ -137,8 +160,15 @@ export default function QuestionBank() {
       </div>
 
       {subjectId && (
-        <div className="bg-card border border-line rounded-xl p-5 space-y-4 card">
-          <p className="text-sm font-medium">Add a question</p>
+        <div className={`bg-card border rounded-xl p-5 space-y-4 card ${editingId ? "border-ink" : "border-line"}`}>
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium">{editingId ? "Edit question" : "Add a question"}</p>
+            {editingId && (
+              <button onClick={reset} className="text-xs text-ink-soft hover:text-ink underline underline-offset-2">
+                Cancel edit
+              </button>
+            )}
+          </div>
           <div className="grid sm:grid-cols-4 gap-3">
             <div>
               <label className={label}>Type</label>
@@ -216,9 +246,9 @@ export default function QuestionBank() {
             </div>
           )}
 
-          <button onClick={add} disabled={saving}
+          <button onClick={submit} disabled={saving}
                   className="rounded-md bg-ink text-white px-5 py-2 text-sm font-medium hover:bg-ink-soft disabled:opacity-50">
-            {saving ? "Adding…" : "Add to bank"}
+            {saving ? "Saving…" : editingId ? "Save changes" : "Add to bank"}
           </button>
         </div>
       )}
@@ -236,18 +266,23 @@ export default function QuestionBank() {
           {rows.length === 0 ? (
             <p className="text-sm text-ink-soft">No questions yet.</p>
           ) : rows.map((q) => (
-            <div key={q.id} className="bg-card border border-line rounded-lg p-3 flex items-start justify-between gap-3">
+            <div key={q.id}
+                 className={`bg-card border rounded-lg p-3 flex items-start justify-between gap-3 ${editingId === q.id ? "border-ink" : "border-line"}`}>
               <div className="min-w-0">
-                <div className="flex items-center gap-2 text-xs text-ink-soft mb-0.5">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-ink-soft mb-0.5">
                   <span className="capitalize font-medium">{q.difficulty}</span>
                   {q.topic && <span>· {q.topic}</span>}
                   <span>· {q.type}</span>
                   <span>· {q.marks} mark{q.marks === 1 ? "" : "s"}</span>
                 </div>
-                <div className="text-sm truncate">{q.text}</div>
+                <div className="text-sm break-words">{q.text}</div>
               </div>
-              <button onClick={() => remove(q.id)}
-                      className="shrink-0 text-sanction text-xs underline underline-offset-2">Remove</button>
+              <div className="shrink-0 flex items-center gap-3">
+                <button onClick={() => startEdit(q)}
+                        className="text-ink text-xs underline underline-offset-2">Edit</button>
+                <button onClick={() => remove(q.id)}
+                        className="text-sanction text-xs underline underline-offset-2">Delete</button>
+              </div>
             </div>
           ))}
         </div>

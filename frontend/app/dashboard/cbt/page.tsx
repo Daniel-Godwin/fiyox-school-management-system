@@ -157,8 +157,8 @@ export default function CBTLanding() {
   const canAuthor = user.role === "teacher" || user.role === "school_admin" || user.role === "super_admin";
   return (
     <div className="max-w-4xl space-y-6">
-      <header className="flex items-start justify-between gap-4">
-        <div>
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+        <div className="min-w-0">
           <h1 className="text-2xl font-bold">Computer-based tests</h1>
           <p className="text-ink-soft text-sm mt-1">
             {canAuthor
@@ -169,11 +169,11 @@ export default function CBTLanding() {
         {canAuthor && (
           <div className="shrink-0 flex items-center gap-2">
             <Link href="/dashboard/cbt/bank"
-                  className="rounded-md border border-line px-4 py-2 text-sm font-medium hover:border-ink">
+                  className="flex-1 sm:flex-none text-center rounded-md border border-line px-4 py-2 text-sm font-medium hover:border-ink">
               Question bank
             </Link>
             <Link href="/dashboard/cbt/new"
-                  className="rounded-md bg-ink text-white px-4 py-2 text-sm font-medium hover:bg-ink-soft">
+                  className="flex-1 sm:flex-none text-center rounded-md bg-ink text-white px-4 py-2 text-sm font-medium hover:bg-ink-soft">
               + New test
             </Link>
           </div>

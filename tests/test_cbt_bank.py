@@ -104,3 +104,28 @@ async def test_bank_rejects_bad_difficulty(ctx):
         "options": [{"id": "a", "text": "x"}, {"id": "b", "text": "y"}],
         "correct": "a"})
     assert r.status_code == 422
+
+
+async def test_bank_question_can_be_edited_and_deleted(ctx):
+    client, ids = ctx
+    hdr = await _teacher(client)
+    created = (await client.post("/api/cbt/bank", headers=hdr, json={
+        "subject_id": ids["subject_id"], "topic": "algebra", "difficulty": "easy",
+        "type": "single", "text": "2+2?",
+        "options": [{"id": "a", "text": "3"}, {"id": "b", "text": "4"}],
+        "correct": "a", "marks": 1})).json()
+    qid = created["id"]
+
+    # edit: fix the text, difficulty and correct answer
+    r = await client.patch(f"/api/cbt/bank/{qid}", headers=hdr, json={
+        "text": "What is 2+2?", "difficulty": "medium", "correct": "b"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["text"] == "What is 2+2?" and body["difficulty"] == "medium"
+    assert body["correct"] == "b"
+
+    # delete
+    assert (await client.delete(f"/api/cbt/bank/{qid}", headers=hdr)).status_code == 204
+    remaining = (await client.get(
+        f"/api/cbt/bank?subject_id={ids['subject_id']}", headers=hdr)).json()
+    assert all(q["id"] != qid for q in remaining)
