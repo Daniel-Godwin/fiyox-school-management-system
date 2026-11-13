@@ -95,16 +95,16 @@ export default function ProctorMonitor() {
 
   return (
     <div className="max-w-4xl space-y-5">
-      <header className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">{mon.exam.title}</h1>
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold break-words">{mon.exam.title}</h1>
           <p className="text-ink-soft text-sm mt-1">
             Live monitor · refreshes automatically
             {mon.exam.proctored && <span className="text-sanction"> · proctored</span>}
           </p>
         </div>
         <Link href={`/dashboard/cbt/${id}/results`}
-              className="shrink-0 rounded-md border border-line px-4 py-2 text-sm font-medium hover:border-ink">
+              className="shrink-0 self-start rounded-md border border-line px-4 py-2 text-sm font-medium hover:border-ink">
           Results
         </Link>
       </header>
