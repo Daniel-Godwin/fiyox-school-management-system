@@ -167,3 +167,18 @@ class ViolationIn(BaseModel):
 
 class ExtendIn(BaseModel):
     minutes: int = 5
+
+
+class ImportItem(BaseModel):
+    text: str = ""
+    type: str = "single"
+    options: list[dict] = Field(default_factory=list)
+    correct: Any = None
+    difficulty: str = "medium"
+    topic: str = ""
+    marks: float = 1.0
+
+
+class BankImportIn(BaseModel):
+    subject_id: str
+    questions: list[ImportItem] = Field(default_factory=list)

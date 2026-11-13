@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { useToast } from "@/components/Toast";
+import CbtBulkImport from "@/components/CbtBulkImport";
 
 type Subject = { id: string; name: string };
 type Opt = { id: string; text: string };
@@ -42,6 +43,7 @@ export default function QuestionBank() {
   const [boolAns, setBoolAns] = useState(true);
   const [shortAns, setShortAns] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [showImport, setShowImport] = useState(false);
 
   useEffect(() => {
     api<Subject[]>("/api/academics/subjects").then(setSubjects).catch(() => {});
@@ -157,7 +159,18 @@ export default function QuestionBank() {
             <span className="text-xs text-ink-soft self-center">{summary.total} total</span>
           </div>
         )}
+        {subjectId && !showImport && (
+          <button onClick={() => setShowImport(true)}
+                  className="ml-auto rounded-md border border-ink text-ink px-4 py-2 text-sm font-medium hover:bg-ink hover:text-white">
+            Import from document
+          </button>
+        )}
       </div>
+
+      {subjectId && showImport && (
+        <CbtBulkImport subjectId={subjectId} onImported={load}
+                       onClose={() => setShowImport(false)} />
+      )}
 
       {subjectId && (
         <div className={`bg-card border rounded-xl p-5 space-y-4 card ${editingId ? "border-ink" : "border-line"}`}>

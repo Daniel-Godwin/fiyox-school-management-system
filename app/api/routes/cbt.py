@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from random import shuffle
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from sqlalchemy import select, func
 
 from app.core.deps import DbDep, CurrentUser, require_roles, tenant_scope
@@ -34,8 +34,9 @@ from app.models.cbt import (
 from app.schemas import (
     QuestionIn, QuestionOut, ExamIn, ExamPatch, ExamOut, ExamDetailOut, SubmitIn,
     BankQuestionIn, BankQuestionPatch, BankQuestionOut, BankSummary, ViolationIn,
-    ExtendIn,
+    ExtendIn, BankImportIn,
 )
+from app.services.cbt_import import parse_document
 from app.services.cbt import (
     grade, student_view, bank_can_fill, difficulty_counts, select_balanced,
 )
@@ -454,6 +455,57 @@ async def add_bank_question(payload: BankQuestionIn, db: DbDep,
     await db.commit()
     await db.refresh(q)
     return q
+
+
+@router.post("/bank/parse")
+async def parse_bank_upload(db: DbDep, user: Annotated[User, AuthorRoles],
+                            file: UploadFile = File(...)):
+    """Extract questions from an uploaded Word/PDF for review before importing.
+    Nothing is saved here — the client previews/edits, then calls /bank/import."""
+    tenant_scope(user)
+    data = await file.read()
+    try:
+        parsed = parse_document(file.filename or "", data)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    questions = [p.as_dict() for p in parsed]
+    if not questions:
+        raise HTTPException(422, "No questions were found. Check the document "
+                                 "uses numbered questions with A) B) C) options "
+                                 "and an 'Answer:' line.")
+    return {
+        "count": len(questions),
+        "valid": sum(1 for q in questions if not q["issues"]),
+        "questions": questions,
+    }
+
+
+@router.post("/bank/import")
+async def import_bank_questions(payload: BankImportIn, db: DbDep,
+                                user: Annotated[User, AuthorRoles]):
+    """Save a reviewed batch to the bank. Invalid items are skipped with a
+    reason so the teacher can fix them, rather than failing the whole upload."""
+    school_id = tenant_scope(user)
+    await _assert_subject(db, school_id, payload.subject_id)
+    created, errors = 0, []
+    for i, item in enumerate(payload.questions):
+        if item.difficulty not in DIFFICULTIES:
+            errors.append({"index": i, "error": "Difficulty must be easy, medium or hard"})
+            continue
+        try:
+            _validate_question(item)
+        except HTTPException as e:
+            errors.append({"index": i, "error": e.detail})
+            continue
+        db.add(CBTBankQuestion(
+            school_id=school_id, subject_id=payload.subject_id,
+            created_by=user.id, updated_by=user.id,
+            topic=item.topic, difficulty=item.difficulty, type=item.type,
+            text=item.text, options=item.options, correct=item.correct,
+            marks=item.marks))
+        created += 1
+    await db.commit()
+    return {"created": created, "skipped": len(errors), "errors": errors}
 
 
 @router.get("/bank", response_model=list[BankQuestionOut])
