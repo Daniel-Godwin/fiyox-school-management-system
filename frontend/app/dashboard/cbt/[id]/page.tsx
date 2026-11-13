@@ -283,6 +283,12 @@ export default function CBTBuilder() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {exam.status === "published" && (
+            <Link href={`/dashboard/cbt/${id}/monitor`}
+                  className="rounded-md border border-ink text-ink px-4 py-2 text-sm font-medium hover:bg-ink hover:text-white">
+              Monitor live
+            </Link>
+          )}
           <Link href={`/dashboard/cbt/${id}/results`}
                 className="rounded-md border border-ledger text-ledger px-4 py-2 text-sm font-medium hover:bg-ledger hover:text-white">
             Results

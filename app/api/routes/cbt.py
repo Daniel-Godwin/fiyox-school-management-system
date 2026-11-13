@@ -34,6 +34,7 @@ from app.models.cbt import (
 from app.schemas import (
     QuestionIn, QuestionOut, ExamIn, ExamPatch, ExamOut, ExamDetailOut, SubmitIn,
     BankQuestionIn, BankQuestionPatch, BankQuestionOut, BankSummary, ViolationIn,
+    ExtendIn,
 )
 from app.services.cbt import (
     grade, student_view, bank_can_fill, difficulty_counts, select_balanced,
@@ -866,3 +867,108 @@ async def my_attempt(attempt_id: str, db: DbDep, user: Annotated[User, StudentRo
             } for qid, info in (a.breakdown or {}).items()],
         })
     return out
+
+
+# ---------- live proctor dashboard ----------
+@router.get("/exams/{exam_id}/monitor")
+async def monitor_exam(exam_id: str, db: DbDep, user: Annotated[User, ViewRoles]):
+    """A live snapshot of every assigned student's sitting — status, progress,
+    remaining time and violations. The front end polls this every few seconds.
+    (One-directional and low-frequency, so polling now, SSE-ready later.)"""
+    school_id = tenant_scope(user)
+    ex = await _exam(db, school_id, exam_id)
+    if user.role == Role.TEACHER:
+        await _assert_can_manage(db, user, school_id, ex)
+    now = _now()
+
+    students = (await db.execute(select(Student).where(
+        Student.school_id == school_id,
+        Student.current_arm_id == ex.arm_id,
+        Student.deleted_at.is_(None)).order_by(Student.last_name, Student.first_name))).scalars().all()
+    attempts = (await db.execute(select(CBTAttempt).where(
+        CBTAttempt.school_id == school_id,
+        CBTAttempt.exam_id == ex.id))).scalars().all()
+    latest: dict = {}
+    for a in attempts:
+        cur = latest.get(a.student_id)
+        if cur is None or a.attempt_no > cur.attempt_no:
+            latest[a.student_id] = a
+
+    rows = []
+    for st in students:
+        a = latest.get(st.id)
+        name = f"{st.first_name} {st.last_name}".strip()
+        if a is None:
+            rows.append({"student_id": st.id, "name": name, "attempt_id": None,
+                         "status": "not_started", "answered": 0,
+                         "total": ex.question_count, "remaining": None,
+                         "violations": 0, "flagged": False})
+            continue
+        total = len(a.question_order or []) or ex.question_count
+        answered = sum(1 for v in (a.answers or {}).values()
+                       if v not in (None, "", []))
+        remaining = None
+        if a.status == ATTEMPT_IN_PROGRESS and a.deadline_at:
+            remaining = max(0, int((_utc(a.deadline_at) - now).total_seconds()))
+        rows.append({
+            "student_id": st.id, "name": name, "attempt_id": a.id,
+            "status": a.status, "answered": answered, "total": total,
+            "remaining": remaining, "violations": a.violation_count or 0,
+            "flagged": (a.violation_count or 0) > 0,
+        })
+
+    return {
+        "exam": {"id": ex.id, "title": ex.title,
+                 "duration_minutes": ex.duration_minutes,
+                 "proctored": ex.proctored},
+        "server_now": now,
+        "counts": {
+            "total": len(students),
+            "in_progress": sum(1 for r in rows if r["status"] == "in_progress"),
+            "submitted": sum(1 for r in rows if r["status"] == "submitted"),
+            "not_started": sum(1 for r in rows if r["status"] == "not_started"),
+            "flagged": sum(1 for r in rows if r["flagged"]),
+        },
+        "students": rows,
+    }
+
+
+async def _managed_attempt(db, school_id: str, user: User, attempt_id: str):
+    """Load an attempt and assert the caller may manage its exam."""
+    a = await db.get(CBTAttempt, attempt_id)
+    if a is None or a.school_id != school_id:
+        raise HTTPException(404, "Attempt not found")
+    ex = await _exam(db, school_id, a.exam_id)
+    if user.role == Role.TEACHER:
+        await _assert_can_manage(db, user, school_id, ex)
+    return a, ex
+
+
+@router.post("/attempts/{attempt_id}/extend")
+async def extend_attempt(attempt_id: str, payload: ExtendIn, db: DbDep,
+                         user: Annotated[User, AuthorRoles]):
+    """Give one student more time by pushing out their deadline."""
+    school_id = tenant_scope(user)
+    a, ex = await _managed_attempt(db, school_id, user, attempt_id)
+    if a.status != ATTEMPT_IN_PROGRESS:
+        raise HTTPException(409, "This sitting is already finished")
+    mins = max(1, int(payload.minutes))
+    base = _utc(a.deadline_at) or _now()
+    a.deadline_at = base + timedelta(minutes=mins)
+    a.updated_by = user.id
+    await db.commit()
+    return {"deadline_at": a.deadline_at}
+
+
+@router.post("/attempts/{attempt_id}/force-submit")
+async def force_submit_attempt(attempt_id: str, db: DbDep,
+                               user: Annotated[User, AuthorRoles]):
+    """End a student's sitting now and grade what they have."""
+    school_id = tenant_scope(user)
+    a, ex = await _managed_attempt(db, school_id, user, attempt_id)
+    if a.status != ATTEMPT_IN_PROGRESS:
+        raise HTTPException(409, "This sitting is already finished")
+    st = await db.get(Student, a.student_id)
+    score, max_score, _ = await _grade_and_close(db, school_id, ex, st, a, {}, True, user.id)
+    await db.commit()
+    return {"status": a.status, "score": score, "max_score": max_score}

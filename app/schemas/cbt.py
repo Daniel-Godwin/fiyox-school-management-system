@@ -163,3 +163,7 @@ class BankSummary(BaseModel):
 class ViolationIn(BaseModel):
     kind: str = "tab_switch"     # tab_switch | blur | fullscreen_exit | ...
     detail: str = ""
+
+
+class ExtendIn(BaseModel):
+    minutes: int = 5

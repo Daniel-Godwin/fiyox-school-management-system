@@ -29,6 +29,7 @@ from app.schemas.users import (
 from app.schemas.cbt import (
     QuestionIn, QuestionOut, ExamIn, ExamPatch, ExamOut, ExamDetailOut, SubmitIn,
     BankQuestionIn, BankQuestionPatch, BankQuestionOut, BankSummary, ViolationIn,
+    ExtendIn,
 )
 from app.schemas.admissions import (
     ApplicationIn, ApplicantCredentials, EntranceSubmitIn,
@@ -57,7 +58,7 @@ __all__ = [
     "QuestionIn", "QuestionOut", "ExamIn", "ExamPatch", "ExamOut",
     "ExamDetailOut", "SubmitIn",
     "BankQuestionIn", "BankQuestionPatch", "BankQuestionOut", "BankSummary",
-    "ViolationIn",
+    "ViolationIn", "ExtendIn",
     "ApplicationIn", "ApplicantCredentials", "EntranceSubmitIn",
     "AdmTestIn", "AdmTestPatch", "AdmQuestionIn", "ApplicantStatusIn", "AdmitIn",
     "AutoReconcileIn", "ManualProposeIn", "ApplicantIdsIn",
