@@ -95,6 +95,20 @@ async def test_pool_exam_publish_validates_the_bank(ctx):
     assert r.json()["question_count"] == 5
 
 
+async def test_pool_publishes_from_a_skewed_bank(ctx):
+    """A bank heavy in one difficulty still publishes — the per-sitting draw
+    backfills across difficulties, so total >= pool_size is enough."""
+    client, ids = ctx
+    hdr = await _teacher(client)
+    exam = await _make_exam(client, ids, hdr, source="pool", pool_size=5,
+                            difficulty_ratio={"easy": 40, "medium": 40, "hard": 20})
+    # all one difficulty (mirrors a Word import with no [easy]/[hard] tags)
+    await _add_bank(client, hdr, ids, "medium", 6)
+    r = await client.post(f"/api/cbt/exams/{exam}/publish", headers=hdr)
+    assert r.status_code == 200, r.text
+    assert r.json()["question_count"] == 5
+
+
 async def test_bank_rejects_bad_difficulty(ctx):
     client, ids = ctx
     hdr = await _teacher(client)

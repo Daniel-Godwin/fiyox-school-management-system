@@ -271,8 +271,9 @@ export default function CBTBuilder() {
   const isDraft = exam.status === "draft";
   const isPool = exam.source === "pool";
   const want = isPool ? splitPool(exam.pool_size, exam.difficulty_ratio) : null;
-  const bankEnough = !!(bank && want
-    && bank.easy >= want.easy && bank.medium >= want.medium && bank.hard >= want.hard);
+  // the draw backfills across difficulties, so the bank only needs pool_size
+  // questions overall — an uneven easy/medium/hard mix is topped up from the rest
+  const bankEnough = !!(bank && bank.total >= exam.pool_size);
   // manual exams need attached questions; pool exams need a sufficient bank
   const canPublish = isPool ? bankEnough : exam.questions.length > 0;
 
@@ -401,16 +402,19 @@ export default function CBTBuilder() {
             </p>
             {want && (
               <p className="text-xs text-ink-soft">
-                Needs <strong>{want.easy}</strong> easy · <strong>{want.medium}</strong> medium ·{" "}
-                <strong>{want.hard}</strong> hard
+                Aims for <strong>{want.easy}</strong> easy · <strong>{want.medium}</strong> medium ·{" "}
+                <strong>{want.hard}</strong> hard (short difficulties are filled from the rest).
                 {bank !== null && (
-                  <> — bank has {bank.easy} · {bank.medium} · {bank.hard} ({bank.total} total){" "}
+                  <> Bank has {bank.easy} easy · {bank.medium} medium · {bank.hard} hard —{" "}
+                    <strong>{bank.total} total</strong>.{" "}
                     {bankEnough
                       ? <span className="text-ledger font-medium">✓ enough to publish</span>
-                      : <span className="text-sanction font-medium">— add more before publishing</span>}
+                      : <span className="text-sanction font-medium">
+                          add {exam.pool_size - bank.total} more before publishing
+                        </span>}
                   </>
                 )}
-                {bank === null && " — checking the bank…"}
+                {bank === null && " Checking the bank…"}
               </p>
             )}
             {isDraft && (
@@ -422,8 +426,10 @@ export default function CBTBuilder() {
           </div>
           {isDraft && !bankEnough && bank !== null && (
             <p className="text-sm rounded-lg border border-sanction/30 bg-sanction/5 text-ink-soft p-3">
-              The bank doesn&apos;t yet hold enough questions for this draw, so Publish is disabled.
-              Add questions to the bank (you can bulk-import a Word or PDF), then come back here to publish.
+              The bank holds {bank.total} question{bank.total === 1 ? "" : "s"} for this subject but
+              this test draws {exam.pool_size} per student, so Publish is disabled. Add{" "}
+              {exam.pool_size - bank.total} more to the bank (you can bulk-import a Word or PDF),
+              then come back here to publish.
             </p>
           )}
         </section>
