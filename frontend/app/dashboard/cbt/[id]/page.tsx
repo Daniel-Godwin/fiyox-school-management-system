@@ -239,6 +239,7 @@ export default function CBTBuilder() {
   const [busy, setBusy] = useState(false);
   const [pullCount, setPullCount] = useState(20);
   const [pulling, setPulling] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   const load = useCallback(() => {
     api<Exam>(`/api/cbt/exams/${id}`).then(setExam)
@@ -264,6 +265,15 @@ export default function CBTBuilder() {
         method: "PATCH", body: JSON.stringify({ component_id: componentId || null }) });
       load();
     } catch (e) { err(e instanceof ApiError ? e.message : "Could not update"); }
+  }
+  async function syncScores() {
+    setSyncing(true);
+    try {
+      const r = await api<{ submitted: number; recorded: number }>(
+        `/api/cbt/exams/${id}/sync-scores`, { method: "POST" });
+      ok(`Recorded ${r.recorded} of ${r.submitted} sitting${r.submitted === 1 ? "" : "s"} to the result sheet.`);
+    } catch (e) { err(e instanceof ApiError ? e.message : "Could not sync scores"); }
+    finally { setSyncing(false); }
   }
 
   if (!exam) {
@@ -375,29 +385,40 @@ export default function CBTBuilder() {
       )}
 
       {/* result-sheet mapping */}
-      <div className="rounded-lg border border-line bg-card p-4">
-        <p className="text-sm font-medium">Counts towards (result sheet)</p>
-        {isDraft ? (
-          <>
-            <select value={exam.component_id ?? ""}
-                    onChange={(e) => setComponent(e.target.value)}
-                    className="mt-2 w-full max-w-sm rounded-md border border-line bg-white px-3 py-2 text-sm">
-              <option value="">Practice only — does not count</option>
-              {components.map((c) => (
-                <option key={c.id} value={c.id}>{c.name} (max {c.max_score})</option>
-              ))}
-            </select>
-            <p className="text-xs text-ink-soft mt-1">
-              When set, each student&apos;s score is scaled to this column and recorded
-              in their report card automatically when they submit.
-            </p>
-          </>
-        ) : (
-          <p className="text-sm text-ink-soft mt-1">
-            {exam.component_name
-              ? <>Scores record into <span className="font-medium text-ledger">{exam.component_name}</span> on the result sheet.</>
-              : "Practice only — scores are not written to the result sheet."}
+      <div className={`rounded-lg border p-4 ${!exam.component_id && !isDraft ? "border-sanction/40 bg-sanction/5" : "border-line bg-card"}`}>
+        <p className="text-sm font-medium">Assessment category (Score Entry column)</p>
+        <select value={exam.component_id ?? ""}
+                onChange={(e) => setComponent(e.target.value)}
+                className="mt-2 w-full max-w-sm rounded-md border border-line bg-white px-3 py-2 text-sm">
+          <option value="">Practice only — does not count towards results</option>
+          {components.map((c) => (
+            <option key={c.id} value={c.id}>{c.name} (max {c.max_score})</option>
+          ))}
+        </select>
+        {exam.component_id ? (
+          <p className="text-xs text-ink-soft mt-1">
+            Each student&apos;s score is scaled to{" "}
+            <span className="font-medium text-ledger">{exam.component_name}</span> and written
+            to their Score Entry sheet and report card when they submit.
           </p>
+        ) : (
+          <p className="text-xs mt-1 text-sanction">
+            This test is not recording scores anywhere. Pick a category above so each
+            student&apos;s result lands in the right Score Entry column.
+          </p>
+        )}
+        {/* recover sittings that happened before a column was linked */}
+        {!isDraft && exam.component_id && (
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <button onClick={syncScores} disabled={syncing}
+                    className="rounded-md border border-ink text-ink px-4 py-1.5 text-sm font-medium hover:bg-ink hover:text-white disabled:opacity-50">
+              {syncing ? "Syncing…" : "Sync scores to results"}
+            </button>
+            <span className="text-xs text-ink-soft">
+              Pushes every submitted sitting into {exam.component_name}. Use this if you
+              linked or changed the category after students had already sat.
+            </span>
+          </div>
         )}
       </div>
 

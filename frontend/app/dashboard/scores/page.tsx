@@ -170,7 +170,10 @@ export default function ScoreEntryPage() {
         setNotice({ kind: "ok", text: "Saved on this device — it will sync automatically when you're back online." });
       } else {
         const n = r.result?.scores_written ?? 0;
-        setNotice({ kind: "ok", text: `Saved ${n} score${n === 1 ? "" : "s"}.` });
+        // re-read from the server so the grid shows the confirmed, persisted
+        // values — not just the local echo — which also surfaces any discrepancy
+        await loadGrid();
+        setNotice({ kind: "ok", text: `Saved ${n} score${n === 1 ? "" : "s"}. These are now stored on the server.` });
       }
     } catch (e) {
       setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Save failed. Check your connection and try again." });

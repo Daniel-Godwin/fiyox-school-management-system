@@ -264,9 +264,12 @@ async def update_exam(exam_id: str, payload: ExamPatch, db: DbDep,
     school_id = tenant_scope(user)
     ex = await _exam(db, school_id, exam_id)
     await _assert_can_manage(db, user, school_id, ex)
-    if ex.status == EXAM_PUBLISHED:
-        raise HTTPException(409, "Close or unpublish the test before editing its settings")
     data = payload.model_dump(exclude_unset=True)
+    # A published/closed test is locked, EXCEPT the result column it counts
+    # towards — that's a results-side mapping, not exam integrity, and teachers
+    # must be able to link or correct it after students have sat (then re-sync).
+    if ex.status in (EXAM_PUBLISHED, EXAM_CLOSED) and set(data) - {"component_id"}:
+        raise HTTPException(409, "Close or unpublish the test before editing its settings")
     if "component_id" in data:
         await _validate_component(db, school_id, data["component_id"])
         await _assert_component_free(db, school_id, ex.subject_id, ex.term_id,
@@ -638,7 +641,42 @@ async def exam_results(exam_id: str, db: DbDep, user: Annotated[User, ViewRoles]
         "exam_id": ex.id, "title": ex.title, "total_marks": ex.total_marks,
         "status": ex.status, "sittings": len(rows), "submitted": len(submitted),
         "average_percent": avg, "rows": rows,
+        "component_id": ex.component_id,
     }
+
+
+@router.post("/exams/{exam_id}/sync-scores")
+async def sync_exam_scores(exam_id: str, db: DbDep,
+                           user: Annotated[User, AuthorRoles]):
+    """Push every already-submitted sitting of this test into the result sheet.
+
+    Scores are normally written at submit time, but only if the test is tied to
+    a result column. When a test is linked to a column *after* students have sat
+    it (or was fixed later), those earlier sittings were never recorded. This
+    re-runs the transfer for all submitted attempts so nothing is left at 0.
+    Idempotent: it upserts, so running it twice changes nothing.
+    """
+    school_id = tenant_scope(user)
+    ex = await _exam(db, school_id, exam_id)
+    await _assert_can_manage(db, user, school_id, ex)
+    if not ex.component_id:
+        raise HTTPException(409, "Link this test to a result column first "
+                                 "(set “Counts towards”), then sync.")
+    attempts = (await db.execute(select(CBTAttempt).where(
+        CBTAttempt.school_id == school_id,
+        CBTAttempt.exam_id == exam_id,
+        CBTAttempt.status == ATTEMPT_SUBMITTED))).scalars().all()
+    students = {s.id: s for s in (await db.execute(select(Student).where(
+        Student.school_id == school_id))).scalars().all()}
+    recorded = 0
+    for a in attempts:
+        st = students.get(a.student_id)
+        if st is None:
+            continue
+        if await _record_to_scoresheet(db, ex, st, a.score, a.max_score, user.id):
+            recorded += 1
+    await db.commit()
+    return {"submitted": len(attempts), "recorded": recorded}
 
 
 # ==================================================================
