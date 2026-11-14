@@ -1030,6 +1030,23 @@ async def _managed_attempt(db, school_id: str, user: User, attempt_id: str):
     return a, ex
 
 
+@router.get("/attempts/{attempt_id}/violations")
+async def attempt_violations(attempt_id: str, db: DbDep,
+                             user: Annotated[User, ViewRoles]):
+    """The anti-cheat log for one sitting — each flagged action with its time,
+    for the proctor to review from the live monitor."""
+    school_id = tenant_scope(user)
+    a, _ex = await _managed_attempt(db, school_id, user, attempt_id)
+    rows = (await db.execute(select(CBTViolation).where(
+        CBTViolation.attempt_id == a.id,
+        CBTViolation.school_id == school_id,
+        CBTViolation.deleted_at.is_(None),
+    ).order_by(CBTViolation.created_at.desc()))).scalars().all()
+    return {"attempt_id": a.id, "count": len(rows),
+            "violations": [{"kind": v.kind, "detail": v.detail, "at": v.created_at}
+                           for v in rows]}
+
+
 @router.post("/attempts/{attempt_id}/extend")
 async def extend_attempt(attempt_id: str, payload: ExtendIn, db: DbDep,
                          user: Annotated[User, AuthorRoles]):

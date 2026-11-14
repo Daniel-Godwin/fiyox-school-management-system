@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, me } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 
 type Option = { id: string; text: string };
@@ -59,8 +59,11 @@ export default function TakeCBT() {
   // proctoring
   const [started, setStarted] = useState(false);           // false = pre-start gate
   const [violations, setViolations] = useState(0);
-  const [warning, setWarning] = useState<{ count: number; max: number } | null>(null);
+  const [warning, setWarning] = useState<{ count: number; max: number; kind: string } | null>(null);
   const [endedByViolation, setEndedByViolation] = useState(false);
+  const [who, setWho] = useState<{ name: string; email: string } | null>(null);
+  const [hidden, setHidden] = useState(false);             // blackout when focus is lost
+  const [stamp, setStamp] = useState("");                  // live clock for the watermark
 
   const offsetRef = useRef(0);
   const deadlineRef = useRef<number | null>(null);
@@ -78,6 +81,23 @@ export default function TakeCBT() {
     api<Review>(`/api/cbt/attempts/${reviewId}`).then(setReview)
       .catch(() => setFatal("Could not load your result."));
   }, [reviewId]);
+
+  // ---- who is sitting (for the traceable watermark) ----
+  useEffect(() => {
+    if (reviewId) return;
+    me().then((u) => setWho({
+      name: `${u.first_name} ${u.last_name}`.trim() || u.email, email: u.email,
+    })).catch(() => {});
+  }, [reviewId]);
+
+  // ---- live clock stamped into the watermark ----
+  useEffect(() => {
+    if (!proctored || !started) return;
+    const t = () => setStamp(new Date().toLocaleString());
+    t();
+    const h = setInterval(t, 1000);
+    return () => clearInterval(h);
+  }, [proctored, started]);
 
   const doSubmit = useCallback(async (auto: boolean) => {
     if (submittedRef.current || !data) return;
@@ -174,7 +194,7 @@ export default function TakeCBT() {
         if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
         setEndedByViolation(true);
       } else {
-        setWarning({ count: r.count, max: r.max });
+        setWarning({ count: r.count, max: r.max, kind });
       }
     } catch { /* ignore — a lost beacon shouldn't break the sitting */ }
   }, [data]);
@@ -183,24 +203,44 @@ export default function TakeCBT() {
   useEffect(() => {
     if (!proctored || !started || result || endedByViolation) return;
     const block = (e: Event) => e.preventDefault();
+    // clear whatever a screenshot/clipboard grab may have captured
+    const scrubClipboard = () => {
+      try { navigator.clipboard?.writeText(""); } catch { /* not permitted — fine */ }
+    };
     const onKey = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
+      // PrintScreen (and Win+Shift+S style grabs) count as a screenshot attempt
+      if (e.key === "PrintScreen" || (e.shiftKey && e.metaKey && k === "s")) {
+        scrubClipboard();
+        registerViolation("screenshot");
+        return;
+      }
       if (e.key === "F12"
         || (e.ctrlKey && e.shiftKey && ["i", "j", "c"].includes(k))
         || (e.ctrlKey && ["u", "s", "p", "c", "x", "v", "a"].includes(k))) {
         e.preventDefault();
       }
     };
-    const onVis = () => { if (document.hidden) registerViolation("tab_switch"); };
-    const onBlur = () => registerViolation("blur");
+    // PrintScreen often only surfaces on keyup, so catch it there too
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "PrintScreen") { scrubClipboard(); registerViolation("screenshot"); }
+    };
+    const onVis = () => {
+      setHidden(document.hidden);
+      if (document.hidden) registerViolation("tab_switch");
+    };
+    const onBlur = () => { setHidden(true); registerViolation("blur"); };
+    const onFocus = () => setHidden(false);
     document.addEventListener("contextmenu", block);
     document.addEventListener("copy", block);
     document.addEventListener("cut", block);
     document.addEventListener("paste", block);
     document.addEventListener("selectstart", block);
     document.addEventListener("keydown", onKey);
+    document.addEventListener("keyup", onKeyUp);
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("blur", onBlur);
+    window.addEventListener("focus", onFocus);
     return () => {
       document.removeEventListener("contextmenu", block);
       document.removeEventListener("copy", block);
@@ -208,8 +248,10 @@ export default function TakeCBT() {
       document.removeEventListener("paste", block);
       document.removeEventListener("selectstart", block);
       document.removeEventListener("keydown", onKey);
+      document.removeEventListener("keyup", onKeyUp);
       document.removeEventListener("visibilitychange", onVis);
       window.removeEventListener("blur", onBlur);
+      window.removeEventListener("focus", onFocus);
     };
   }, [proctored, started, result, endedByViolation, registerViolation]);
 
@@ -263,8 +305,9 @@ export default function TakeCBT() {
           <p className="text-4xl mb-2">⚠️</p>
           <h1 className="text-xl font-bold">Test submitted</h1>
           <p className="text-ink-soft mt-2">
-            Your test left full screen too many times and was submitted automatically.
-            Your teacher can see the record.
+            Your test recorded too many flagged actions (leaving the screen or
+            screenshot attempts) and was submitted automatically. Your teacher can
+            see the full record.
           </p>
         </div>
         <Link href="/dashboard/cbt" className="inline-block text-sm text-ink font-medium hover:underline">← Back to my tests</Link>
@@ -304,7 +347,8 @@ export default function TakeCBT() {
           <ul className="text-sm text-ink-soft list-disc pl-5 space-y-1">
             <li>It opens in full screen, and copy / paste / right-click are disabled.</li>
             <li>Leaving the test (switching tab or app) is recorded.</li>
-            <li>After {data.exam.max_violations ?? 3} times, your test is submitted automatically.</li>
+            <li>Screenshot attempts are flagged, and your name and the time are stamped across the screen.</li>
+            <li>After {data.exam.max_violations ?? 3} flagged actions, your test is submitted automatically.</li>
           </ul>
           {data.exam.instructions && (
             <p className="text-sm text-ink-soft border border-dashed border-line rounded-lg p-3">{data.exam.instructions}</p>
@@ -395,17 +439,50 @@ export default function TakeCBT() {
         </button>
       </div>
 
+      {/* traceable identity watermark — makes any leaked screenshot attributable */}
+      {proctored && started && who && (
+        <div aria-hidden className="pointer-events-none fixed inset-0 z-40 overflow-hidden">
+          <div className="flex flex-wrap gap-x-10 gap-y-14 p-6 -rotate-12 scale-125 opacity-[0.08]">
+            {Array.from({ length: 80 }).map((_, i) => (
+              <span key={i} className="text-[11px] font-semibold text-ink whitespace-nowrap">
+                {who.name} · {who.email} · {stamp}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* blackout when focus is lost — a backgrounded capture grabs nothing useful */}
+      {proctored && started && hidden && !result && !endedByViolation && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-ink text-white text-center px-6">
+          <div>
+            <p className="text-4xl mb-2">⛔</p>
+            <p className="font-bold text-lg">Return to your test</p>
+            <p className="text-white/70 text-sm mt-1">
+              Leaving the test screen is recorded for your teacher.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* violation warning modal */}
       {warning && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 px-4">
           <div className="bg-card rounded-xl border border-sanction/40 p-6 max-w-sm w-full space-y-3 text-center">
             <p className="text-3xl">⚠️</p>
-            <h2 className="text-lg font-bold">Stay on the test</h2>
+            <h2 className="text-lg font-bold">
+              {warning.kind === "screenshot" ? "Screenshots aren't allowed" : "Stay on the test"}
+            </h2>
             <p className="text-sm text-ink-soft">
-              Leaving the test was recorded (warning {warning.count} of {warning.max}).
+              {warning.kind === "screenshot"
+                ? "A screenshot attempt was recorded"
+                : "Leaving the test was recorded"}
+              {" "}(warning {warning.count} of {warning.max}).
               {warning.count >= warning.max - 1
                 ? " One more and your test will be submitted automatically."
-                : " Please don't switch tabs or apps."}
+                : warning.kind === "screenshot"
+                  ? " Your name and the time are stamped across the screen."
+                  : " Please don't switch tabs or apps."}
             </p>
             <button onClick={() => setWarning(null)}
                     className="rounded-md bg-ink text-white px-5 py-2 text-sm font-medium hover:bg-ink-soft">
