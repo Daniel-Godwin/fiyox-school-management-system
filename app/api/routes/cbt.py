@@ -34,7 +34,7 @@ from app.models.cbt import (
 from app.schemas import (
     QuestionIn, QuestionOut, ExamIn, ExamPatch, ExamOut, ExamDetailOut, SubmitIn,
     BankQuestionIn, BankQuestionPatch, BankQuestionOut, BankSummary, ViolationIn,
-    ExtendIn, BankImportIn,
+    ExtendIn, BankImportIn, FromBankIn,
 )
 from app.services.cbt_import import parse_document
 from app.services.cbt import (
@@ -354,6 +354,40 @@ async def delete_question(exam_id: str, qid: str, db: DbDep,
         raise HTTPException(404, "Question not found")
     q.deleted_at = _now()
     await db.commit()
+
+
+@router.post("/exams/{exam_id}/questions/from-bank")
+async def add_questions_from_bank(exam_id: str, payload: FromBankIn, db: DbDep,
+                                  user: Annotated[User, AuthorRoles]):
+    """Copy a balanced set of the subject's bank questions into a draft exam
+    as real, attached questions. Lets a teacher fill any test from the bank
+    without retyping — the copies are a frozen snapshot, so later bank edits
+    don't change a test that's already been filled."""
+    school_id = tenant_scope(user)
+    ex = await _exam(db, school_id, exam_id)
+    await _assert_can_manage(db, user, school_id, ex)
+    if ex.status != EXAM_DRAFT:
+        raise HTTPException(409, "Only a draft test can be filled from the bank")
+    if payload.count <= 0:
+        raise HTTPException(422, "Choose how many questions to add")
+    bank = (await db.execute(select(CBTBankQuestion).where(
+        CBTBankQuestion.school_id == school_id,
+        CBTBankQuestion.subject_id == ex.subject_id,
+        CBTBankQuestion.active.is_(True),
+        CBTBankQuestion.deleted_at.is_(None)))).scalars().all()
+    if not bank:
+        raise HTTPException(409, "Your question bank has no questions for this subject yet.")
+    chosen = select_balanced(list(bank), payload.count, payload.difficulty_ratio)
+    start = (await db.execute(select(func.count()).select_from(CBTQuestion).where(
+        CBTQuestion.exam_id == exam_id,
+        CBTQuestion.deleted_at.is_(None)))).scalar() or 0
+    for i, bq in enumerate(chosen, start=1):
+        db.add(CBTQuestion(
+            school_id=school_id, exam_id=exam_id, created_by=user.id, updated_by=user.id,
+            type=bq.type, text=bq.text, options=bq.options, correct=bq.correct,
+            marks=bq.marks, sequence=start + i))
+    await db.commit()
+    return {"added": len(chosen), "requested": payload.count, "bank_total": len(bank)}
 
 
 async def _bank_counts(db, school_id: str, subject_id: str) -> dict:

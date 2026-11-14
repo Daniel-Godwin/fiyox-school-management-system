@@ -237,6 +237,8 @@ export default function CBTBuilder() {
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pullCount, setPullCount] = useState(20);
+  const [pulling, setPulling] = useState(false);
 
   const load = useCallback(() => {
     api<Exam>(`/api/cbt/exams/${id}`).then(setExam)
@@ -247,13 +249,14 @@ export default function CBTBuilder() {
   useEffect(() => {
     api<Component[]>("/api/assessment-components").then(setComponents).catch(() => {});
   }, []);
-  // for pool exams, keep an eye on whether the bank can fill the draw
+  // bank counts for this subject — drives the pool check and the "fill from
+  // bank" action on manual tests
   useEffect(() => {
-    if (exam?.source === "pool" && exam.subject_id) {
+    if (exam?.subject_id) {
       api<BankSummary>(`/api/cbt/bank/summary?subject_id=${exam.subject_id}`)
         .then(setBank).catch(() => setBank(null));
     }
-  }, [exam?.source, exam?.subject_id]);
+  }, [exam?.subject_id]);
 
   async function setComponent(componentId: string) {
     try {
@@ -300,6 +303,16 @@ export default function CBTBuilder() {
       await api(`/api/cbt/exams/${id}/questions/${qid}`, { method: "DELETE" });
       load();
     } catch (e) { err(e instanceof ApiError ? e.message : "Could not delete"); }
+  }
+  async function fillFromBank() {
+    setPulling(true);
+    try {
+      const r = await api<{ added: number }>(`/api/cbt/exams/${id}/questions/from-bank`, {
+        method: "POST", body: JSON.stringify({ count: Number(pullCount) }) });
+      ok(`Added ${r.added} question${r.added === 1 ? "" : "s"} from the bank.`);
+      load();
+    } catch (e) { err(e instanceof ApiError ? e.message : "Could not add from the bank"); }
+    setPulling(false);
   }
 
   return (
@@ -442,9 +455,37 @@ export default function CBTBuilder() {
           Questions ({exam.questions.length})
         </h2>
 
+        {/* pull a ready set straight from the question bank */}
+        {isDraft && bank !== null && bank.total > 0 && (
+          <div className="rounded-lg border border-ink/30 bg-paper/60 p-4 space-y-2">
+            <p className="text-sm font-medium">Add from your question bank</p>
+            <p className="text-xs text-ink-soft">
+              Your {exam.subject_name ?? "subject"} bank has <strong>{bank.total}</strong>{" "}
+              question{bank.total === 1 ? "" : "s"} ({bank.easy} easy · {bank.medium} medium ·{" "}
+              {bank.hard} hard). Pull a balanced set into this test — you can still edit or
+              remove any of them afterwards.
+            </p>
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <label className="text-sm text-ink-soft">How many</label>
+              <input type="number" min={1} max={bank.total} value={pullCount}
+                     onChange={(e) => setPullCount(Number(e.target.value))}
+                     className="w-20 rounded-md border border-line bg-white px-2 py-1 text-sm" />
+              <button onClick={fillFromBank} disabled={pulling || pullCount < 1}
+                      className="rounded-md bg-ink text-white px-4 py-1.5 text-sm font-medium hover:bg-ink-soft disabled:opacity-50">
+                {pulling ? "Adding…" : "Add from bank"}
+              </button>
+              {pullCount > bank.total && (
+                <span className="text-xs text-sanction">
+                  Only {bank.total} available — we&apos;ll add {bank.total}.
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
         {exam.questions.length === 0 && !adding && (
           <p className="text-sm text-ink-soft border border-dashed border-line rounded-lg p-5">
-            No questions yet. Add some below, then publish.
+            No questions yet. Add some from the bank above, or write your own below, then publish.
           </p>
         )}
 

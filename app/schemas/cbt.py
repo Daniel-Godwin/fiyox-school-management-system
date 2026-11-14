@@ -182,3 +182,10 @@ class ImportItem(BaseModel):
 class BankImportIn(BaseModel):
     subject_id: str
     questions: list[ImportItem] = Field(default_factory=list)
+
+
+class FromBankIn(BaseModel):
+    """Pull a balanced set of bank questions into a draft exam as real,
+    attached questions."""
+    count: int = 20
+    difficulty_ratio: dict = Field(default_factory=dict)
