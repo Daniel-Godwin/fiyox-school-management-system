@@ -101,19 +101,18 @@ def difficulty_counts(pool_size: int, ratio: dict | None) -> dict:
 
 
 def bank_can_fill(counts_by_diff: dict, pool_size: int, ratio: dict | None) -> tuple[bool, str]:
-    """Publish-time guard: can the bank satisfy this pool exam exactly?"""
+    """Publish-time guard. The per-sitting draw (select_balanced) backfills
+    across difficulties, so a pool can be filled whenever the bank holds at
+    least pool_size active questions overall. An uneven difficulty mix is
+    balanced as far as it can be and then topped up from the rest — it does
+    not block publishing."""
     if pool_size <= 0:
         return False, "Set how many questions each sitting should draw."
     total = sum(int(counts_by_diff.get(d, 0)) for d in DIFFICULTIES)
     if total < pool_size:
+        need = pool_size - total
         return False, (f"The bank has {total} question(s) for this subject but "
-                       f"the exam needs {pool_size}.")
-    want = difficulty_counts(pool_size, ratio)
-    for d in DIFFICULTIES:
-        have = int(counts_by_diff.get(d, 0))
-        if have < want[d]:
-            return False, (f"Need {want[d]} {d} question(s) but the bank has "
-                           f"only {have}. Add more or adjust the ratio.")
+                       f"the exam needs {pool_size}. Add {need} more.")
     return True, ""
 
 
