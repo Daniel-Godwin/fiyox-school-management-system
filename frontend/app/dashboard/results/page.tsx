@@ -21,7 +21,7 @@ type Row = {
   position: number;
   class_size: number;
   is_published: boolean;
-  approval_status: "draft" | "submitted" | "approved" | "not_computed";
+  approval_status: "draft" | "submitted" | "approved" | "rejected" | "not_computed";
   approval_note: string;
   computed: boolean;
 };
@@ -276,11 +276,13 @@ export default function ResultsPage() {
   const notComputed = rows?.filter((r) => !r.computed).length ?? 0;
   // the arm moves through the workflow together; derive one status for the controls
   const hasRows = !!rows && rows.length > 0;
-  const anyDraft = rows?.some((r) => r.approval_status === "draft") ?? false;
+  const anyRejected = rows?.some((r) => r.approval_status === "rejected") ?? false;
+  // a fresh draft or a corrected-after-rejection result can be submitted
+  const anySubmittable = rows?.some((r) => r.approval_status === "draft" || r.approval_status === "rejected") ?? false;
   const anySubmitted = rows?.some((r) => r.approval_status === "submitted") ?? false;
   const anyApprovedUnpublished =
     rows?.some((r) => r.approval_status === "approved" && !r.is_published) ?? false;
-  const returnNote = rows?.find((r) => r.approval_status === "draft" && r.approval_note)?.approval_note ?? "";
+  const returnNote = rows?.find((r) => r.approval_status === "rejected" && r.approval_note)?.approval_note ?? "";
 
   // class performance summary from the computed rows
   const computedRows = rows?.filter((r) => r.computed && r.average !== null) ?? [];
@@ -361,11 +363,11 @@ export default function ResultsPage() {
             )}
 
             {/* ---- approval gate ON: submit -> approve -> publish ---- */}
-            {approvalOn && hasRows && anyDraft && (
+            {approvalOn && hasRows && anySubmittable && (
               <button onClick={() => workflow("submit", "submit for approval")}
                       disabled={busy !== null}
                       className="rounded-md bg-brass text-white px-4 py-2 text-sm font-medium hover:opacity-90 disabled:opacity-50">
-                {busy === "submit" ? "Submitting…" : "Submit for approval"}
+                {busy === "submit" ? "Submitting…" : anyRejected ? "Resubmit for approval" : "Submit for approval"}
               </button>
             )}
             {approvalOn && isAdmin && hasRows && anySubmitted && (
@@ -452,11 +454,12 @@ export default function ResultsPage() {
           {returnNote && (
             <div className="rounded-lg border border-sanction/40 bg-sanction/5 p-3 max-w-2xl">
               <p className="text-sm">
-                <span className="font-medium text-sanction">Returned for revision: </span>
+                <span className="font-medium text-sanction">Rejected — reason: </span>
                 {returnNote}
               </p>
               <p className="text-xs text-ink-soft mt-1">
-                Correct the scores, recompute, then submit for approval again.
+                Correct the scores in Score Entry, recompute, then use
+                “Resubmit for approval”. The reason stays here until you resubmit.
               </p>
             </div>
           )}
@@ -555,7 +558,11 @@ export default function ResultsPage() {
                           </span>
                         ) : r.approval_status === "submitted" ? (
                           <span className="inline-block rounded-full bg-brass/20 text-ink px-2 py-0.5 text-xs font-medium">
-                            Awaiting approval
+                            Pending approval
+                          </span>
+                        ) : r.approval_status === "rejected" ? (
+                          <span className="inline-block rounded-full bg-sanction/10 text-sanction px-2 py-0.5 text-xs font-medium">
+                            Rejected
                           </span>
                         ) : (
                           <span className="inline-block rounded-full bg-line text-ink-soft px-2 py-0.5 text-xs font-medium">
