@@ -19,6 +19,12 @@ type Student = {
   current_arm_id: string | null;
 };
 type ScoreCell = { student_id: string; component_id: string; score: number };
+type PvComp = { id: string; name: string; max_score: number; is_exam: boolean; cbt_backed: boolean };
+type PvStudent = {
+  student_id: string; admission_number: string; name: string;
+  scores: Record<string, number>; total: number; missing: string[];
+};
+type Preview = { components: PvComp[]; students: PvStudent[] };
 
 /** cell key */
 const k = (s: string, c: string) => `${s}::${c}`;
@@ -39,6 +45,7 @@ export default function ScoreEntryPage() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [preview, setPreview] = useState<Preview | null>(null);
 
   // load selectors once (served from the offline cache when there's no network)
   useEffect(() => {
@@ -180,6 +187,18 @@ export default function ScoreEntryPage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function openPreview() {
+    setSaving(true);
+    setNotice(null);
+    try {
+      const p = await cachedGet<Preview>(
+        `/api/scores/preview?arm_id=${armId}&subject_id=${subjectId}&term_id=${termId}`);
+      setPreview(p.data);
+    } catch {
+      setNotice({ kind: "err", text: "Could not load the preview. Save first, then try again." });
+    } finally { setSaving(false); }
   }
 
   const totalFor = (sid: string) =>
@@ -372,13 +391,20 @@ export default function ScoreEntryPage() {
             ))}
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 flex-wrap">
             <button
               onClick={save}
               disabled={saving || invalidCount > 0}
               className="rounded-md bg-ink text-white px-5 py-2.5 text-sm font-medium hover:bg-ink-soft disabled:opacity-50"
             >
               {saving ? "Saving…" : "Save scores"}
+            </button>
+            <button
+              onClick={openPreview}
+              disabled={saving || invalidCount > 0}
+              className="rounded-md border border-ink text-ink px-5 py-2.5 text-sm font-medium hover:bg-ink hover:text-white disabled:opacity-50"
+            >
+              Preview &amp; verify
             </button>
             {invalidCount > 0 && (
               <span className="text-sm text-sanction">
@@ -394,6 +420,70 @@ export default function ScoreEntryPage() {
               </span>
             )}
           </div>
+
+          {/* read-only verify sheet: confirm every mark (incl. CBT) before results go up */}
+          {preview && (
+            <section className="rounded-lg border border-ink/30 bg-paper/50 p-4 space-y-3 fiyox-rise">
+              <div className="flex items-baseline justify-between gap-2">
+                <p className="text-sm font-medium">Preview &amp; verify — saved scores on the server</p>
+                <button onClick={() => setPreview(null)}
+                        className="text-xs text-ink-soft underline underline-offset-2">Close</button>
+              </div>
+              <p className="text-xs text-ink-soft">
+                These are the marks currently stored. <span className="text-ledger font-medium">CBT</span> columns
+                are filled automatically from a test; a red <span className="text-sanction font-medium">—</span> means
+                no mark has been entered yet. Check totals and fill any gaps before results are sent for approval.
+              </p>
+              <div className="overflow-x-auto rounded-lg border border-line bg-card">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="bg-ink text-white text-left">
+                      <th className="px-3 py-2 font-medium">Student</th>
+                      {preview.components.map((c) => (
+                        <th key={c.id} className="px-3 py-2 font-medium text-center whitespace-nowrap">
+                          {c.name} <span className="opacity-60 font-normal">/{c.max_score}</span>
+                          {c.cbt_backed && <span className="block text-[10px] text-brass">CBT</span>}
+                        </th>
+                      ))}
+                      <th className="px-3 py-2 font-medium text-right">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.students.map((s, i) => (
+                      <tr key={s.student_id} className={i % 2 ? "bg-paper" : "bg-card"}>
+                        <td className="px-3 py-1.5 whitespace-nowrap">
+                          <span className="tabular text-ink-soft mr-2">{s.admission_number}</span>{s.name}
+                        </td>
+                        {preview.components.map((c) => (
+                          <td key={c.id} className="px-3 py-1.5 text-center tabular">
+                            {s.missing.includes(c.id)
+                              ? <span className="text-sanction font-semibold">—</span>
+                              : s.scores[c.id]}
+                          </td>
+                        ))}
+                        <td className="px-3 py-1.5 text-right tabular font-medium">{s.total}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {(() => {
+                const gaps = preview.students.filter((s) => s.missing.length > 0).length;
+                return gaps > 0 ? (
+                  <p className="text-xs text-sanction">
+                    {gaps} student{gaps === 1 ? "" : "s"} still {gaps === 1 ? "has" : "have"} one or
+                    more empty columns. Once everything is correct, the class results can be
+                    submitted for approval from the Results page.
+                  </p>
+                ) : (
+                  <p className="text-xs text-ledger">
+                    Every student has a mark in every column. You can submit the class results
+                    for approval from the Results page.
+                  </p>
+                );
+              })()}
+            </section>
+          )}
         </>
       )}
     </div>

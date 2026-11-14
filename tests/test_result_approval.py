@@ -118,12 +118,70 @@ async def test_principal_can_return_results_with_a_reason(ctx):
 
     rows = (await client.get("/api/results", headers=ah, params={
         "arm_id": ids["arm_id"], "term_id": ids["term_id"]})).json()
-    assert _statuses(rows) == {("draft", False)}
+    assert _statuses(rows) == {("rejected", False)}
     assert rows[0]["approval_note"] == "Re-check the Maths exam column"
 
     # a returned result cannot be published until it goes round again
     assert (await client.post("/api/results/publish", headers=ah, json={
         "arm_id": ids["arm_id"], "term_id": ids["term_id"]})).json()["published"] == 0
+
+
+async def test_rejected_reason_survives_recompute_then_resubmit(ctx):
+    client, ids = ctx
+    ah = await _computed(client, ids)
+    th = await headers(client, "teacher@gss-ikeja.ng", "teach123")
+    await client.post("/api/results/submit", headers=th, json={
+        "arm_id": ids["arm_id"], "term_id": ids["term_id"]})
+    await client.post(
+        f"/api/results/return?arm_id={ids['arm_id']}&term_id={ids['term_id']}",
+        headers=ah, json={"form_teacher_comment": "Fix the exam column"})
+
+    # teacher fixes a mark; admin recomputes — the rejection + reason stay visible
+    comp = ids["component_ids"]
+    await client.post("/api/scores", headers=ah, json={
+        "subject_id": ids["subject_id"], "arm_id": ids["arm_id"],
+        "term_id": ids["term_id"],
+        "rows": [{"student_id": ids["student_ids"][0], "scores": {comp[3]: 60}}]})
+    await client.post("/api/results/compute", headers=ah, json={
+        "arm_id": ids["arm_id"], "term_id": ids["term_id"]})
+    rows = (await client.get("/api/results", headers=ah, params={
+        "arm_id": ids["arm_id"], "term_id": ids["term_id"]})).json()
+    assert _statuses(rows) == {("rejected", False)}
+    assert rows[0]["approval_note"] == "Fix the exam column"
+
+    # resubmitting a rejected result sends it back for approval and clears the note
+    assert (await client.post("/api/results/submit", headers=th, json={
+        "arm_id": ids["arm_id"], "term_id": ids["term_id"]})).json()["submitted"] \
+        == len(ids["student_ids"])
+    rows = (await client.get("/api/results", headers=ah, params={
+        "arm_id": ids["arm_id"], "term_id": ids["term_id"]})).json()
+    assert _statuses(rows) == {("submitted", False)}
+
+
+async def test_approved_scores_are_locked_for_the_teacher(ctx):
+    client, ids = ctx
+    ah = await _computed(client, ids)
+    th = await headers(client, "teacher@gss-ikeja.ng", "teach123")
+    await client.post("/api/results/submit", headers=th, json={
+        "arm_id": ids["arm_id"], "term_id": ids["term_id"]})
+    await client.post("/api/results/approve", headers=ah, json={
+        "arm_id": ids["arm_id"], "term_id": ids["term_id"]})
+
+    # a teacher can no longer change an approved student's mark
+    comp = ids["component_ids"]
+    stu = ids["student_ids"][0]
+    r = (await client.post("/api/scores", headers=th, json={
+        "subject_id": ids["subject_id"], "arm_id": ids["arm_id"],
+        "term_id": ids["term_id"],
+        "rows": [{"student_id": stu, "scores": {comp[0]: 9}}]})).json()
+    assert r["scores_written"] == 0 and r.get("locked_skipped") == 1
+
+    # the admin can still correct it
+    r2 = (await client.post("/api/scores", headers=ah, json={
+        "subject_id": ids["subject_id"], "arm_id": ids["arm_id"],
+        "term_id": ids["term_id"],
+        "rows": [{"student_id": stu, "scores": {comp[0]: 9}}]})).json()
+    assert r2["scores_written"] == 1
 
 
 async def test_edit_endpoint_cannot_bypass_the_approval_gate(ctx):

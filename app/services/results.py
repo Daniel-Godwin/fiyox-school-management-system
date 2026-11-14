@@ -98,10 +98,15 @@ async def compute_term(db: AsyncSession, school_id: str, arm_id: str, term_id: s
                                  TermResult.arm_id == arm_id,
                                  TermResult.term_id == term_id)
     )).scalars().all()
+    previous_rejection: dict[str, str] = {}
     for tr in existing_trs:
         if tr.comments_edited:
             previous_comments[tr.student_id] = (tr.form_teacher_comment,
                                                 tr.principal_comment)
+        # keep a rejection visible across the recompute the teacher just did to
+        # fix it, so they still see it was returned and why — until they resubmit
+        if tr.approval_status == "rejected":
+            previous_rejection[tr.student_id] = tr.approval_note or ""
 
     # wipe old computed rows for this arm+term, then rewrite
     for model in (SubjectResult, TermResult):
@@ -144,6 +149,9 @@ async def compute_term(db: AsyncSession, school_id: str, arm_id: str, term_id: s
             subjects_count=subj_count, class_size=len(grand),
             overall_position=overall_positions.get(sid, 0),
         )
+        if sid in previous_rejection:
+            term_results[sid].approval_status = "rejected"
+            term_results[sid].approval_note = previous_rejection[sid]
         db.add(term_results[sid])
 
     # ---- auto-generated comments (class-relative) ----

@@ -84,6 +84,63 @@ async def get_scores(
              "score": r.score} for r in rows]
 
 
+@router.get("/scores/preview", tags=["results"])
+async def preview_scores(
+    db: DbDep,
+    user: Annotated[User, Depends(require_roles(Role.TEACHER, Role.SCHOOL_ADMIN, Role.PRINCIPAL))],
+    arm_id: str = Query(...),
+    subject_id: str = Query(...),
+    term_id: str = Query(...),
+):
+    """Read-only verification sheet for one subject before results are submitted.
+
+    Shows every student with their mark in each assessment category, the running
+    subject total, which categories are auto-filled from a CBT test, and which
+    marks are still missing — so the teacher can verify CBT scores and spot gaps
+    before sending results for approval.
+    """
+    from app.models.cbt import CBTExam
+    school_id = tenant_scope(user)
+    if user.role != Role.PRINCIPAL:
+        await assert_may_touch_scores(db, user, school_id, subject_id, arm_id)
+
+    comps = sorted((await db.execute(select(AssessmentComponent).where(
+        AssessmentComponent.school_id == school_id,
+        AssessmentComponent.deleted_at.is_(None)))).scalars().all(),
+        key=lambda c: c.sequence)
+    # which categories are fed by a CBT test for this subject + term
+    cbt_backed = {e.component_id for e in (await db.execute(select(CBTExam).where(
+        CBTExam.school_id == school_id, CBTExam.subject_id == subject_id,
+        CBTExam.term_id == term_id, CBTExam.component_id.isnot(None),
+        CBTExam.deleted_at.is_(None)))).scalars().all()}
+
+    students = sorted((await db.execute(select(Student).where(
+        Student.school_id == school_id, Student.current_arm_id == arm_id,
+        Student.deleted_at.is_(None)))).scalars().all(),
+        key=lambda s: s.admission_number)
+    sids = [s.id for s in students]
+    by_student: dict[str, dict[str, float]] = {}
+    if sids:
+        for r in (await db.execute(select(ScoreEntry).where(
+                ScoreEntry.school_id == school_id, ScoreEntry.student_id.in_(sids),
+                ScoreEntry.subject_id == subject_id,
+                ScoreEntry.term_id == term_id))).scalars().all():
+            by_student.setdefault(r.student_id, {})[r.component_id] = r.score
+
+    return {
+        "components": [{"id": c.id, "name": c.name, "max_score": c.max_score,
+                        "is_exam": c.is_exam, "cbt_backed": c.id in cbt_backed}
+                       for c in comps],
+        "students": [{
+            "student_id": s.id, "admission_number": s.admission_number,
+            "name": f"{s.first_name} {s.last_name}",
+            "scores": by_student.get(s.id, {}),
+            "total": round(sum(by_student.get(s.id, {}).values()), 2),
+            "missing": [c.id for c in comps if c.id not in by_student.get(s.id, {})],
+        } for s in students],
+    }
+
+
 @router.post("/scores", tags=["results"])
 async def enter_scores(
     payload: BulkScoresIn, request: Request, db: DbDep,
@@ -95,8 +152,25 @@ async def enter_scores(
     await assert_may_touch_scores(db, user, school_id,
                                   payload.subject_id, payload.arm_id)
     ip = request.client.host if request.client else None
-    written = 0
+
+    # POST-APPROVAL LOCK: when the school runs the approval gate, a teacher may
+    # not change a mark once that student's result for this term is approved or
+    # already published. The admin can still correct (e.g. return then fix).
+    locked: set[str] = set()
+    if user.role == Role.TEACHER:
+        from app.models.school import School
+        school = await db.get(School, school_id)
+        if school and school.result_approval_required:
+            locked = {tr.student_id for tr in (await db.execute(select(TermResult).where(
+                TermResult.school_id == school_id, TermResult.arm_id == payload.arm_id,
+                TermResult.term_id == payload.term_id))).scalars().all()
+                if tr.approval_status == "approved" or tr.is_published}
+
+    written = locked_skipped = 0
     for row in payload.rows:
+        if row.student_id in locked:
+            locked_skipped += 1
+            continue
         for component_id, score in row.scores.items():
             existing = (await db.execute(select(ScoreEntry).where(
                 ScoreEntry.school_id == school_id,
@@ -132,7 +206,12 @@ async def enter_scores(
                     changes={"score": {"old": None, "new": score}}, ip_address=ip)
             written += 1
     await db.commit()
-    return {"scores_written": written}
+    out = {"scores_written": written}
+    if locked_skipped:
+        out["locked_skipped"] = locked_skipped
+        out["note"] = ("Some results are already approved and were not changed. "
+                       "Ask the admin to return them for revision first.")
+    return out
 
 
 # ---------- Compute (school admin) ----------
@@ -254,7 +333,8 @@ async def submit_results(
         raise HTTPException(status_code=404, detail="No computed results to submit")
     submitted = 0
     for tr in results:
-        if tr.approval_status == "draft":
+        # a fresh draft, or one that was rejected and has now been corrected
+        if tr.approval_status in ("draft", "rejected"):
             tr.approval_status = "submitted"
             tr.approval_note = ""
             tr.updated_by = user.id
@@ -314,7 +394,7 @@ async def return_results(
     returned = 0
     for tr in results:
         if tr.approval_status == "submitted":
-            tr.approval_status = "draft"
+            tr.approval_status = "rejected"
             tr.approval_note = note
             tr.updated_by = user.id
             returned += 1
