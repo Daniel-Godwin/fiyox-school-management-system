@@ -1030,6 +1030,33 @@ async def _managed_attempt(db, school_id: str, user: User, attempt_id: str):
     return a, ex
 
 
+@router.get("/exams/{exam_id}/violations")
+async def exam_violations(exam_id: str, db: DbDep,
+                          user: Annotated[User, ViewRoles]):
+    """Every flagged anti-cheat event across the whole test, with the student,
+    kind and time — the source for the proctor-log CSV export."""
+    school_id = tenant_scope(user)
+    ex = await _exam(db, school_id, exam_id)
+    if user.role == Role.TEACHER:
+        await _assert_can_manage(db, user, school_id, ex)
+    rows = (await db.execute(
+        select(CBTViolation, CBTAttempt, Student)
+        .join(CBTAttempt, CBTViolation.attempt_id == CBTAttempt.id)
+        .join(Student, CBTAttempt.student_id == Student.id)
+        .where(CBTAttempt.exam_id == ex.id,
+               CBTViolation.school_id == school_id,
+               CBTViolation.deleted_at.is_(None))
+        .order_by(CBTViolation.created_at))).all()
+    out = [{
+        "student": f"{st.first_name} {st.last_name}".strip(),
+        "admission_number": st.admission_number or "",
+        "attempt_no": a.attempt_no,
+        "kind": v.kind, "detail": v.detail, "at": v.created_at,
+    } for v, a, st in rows]
+    return {"exam_id": ex.id, "exam_title": ex.title, "count": len(out),
+            "violations": out}
+
+
 @router.get("/attempts/{attempt_id}/violations")
 async def attempt_violations(attempt_id: str, db: DbDep,
                              user: Annotated[User, ViewRoles]):
