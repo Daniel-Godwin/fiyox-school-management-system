@@ -13,13 +13,32 @@ type Question = {
 };
 type Exam = {
   id: string; title: string; instructions: string; status: string;
-  subject_name: string | null; class_label: string | null;
+  subject_id: string; subject_name: string | null; class_label: string | null;
   duration_minutes: number; max_attempts: number;
   shuffle_questions: boolean; show_results_immediately: boolean;
   total_marks: number; question_count: number; questions: Question[];
   component_id: string | null; component_name: string | null;
+  source: string; pool_size: number; difficulty_ratio: Record<string, number>;
 };
 type Component = { id: string; name: string; max_score: number };
+type BankSummary = { easy: number; medium: number; hard: number; total: number };
+
+// largest-remainder split — mirrors the backend's pool balancing
+function splitPool(poolSize: number, ratio: Record<string, number>) {
+  const r = { easy: ratio.easy ?? 0, medium: ratio.medium ?? 0, hard: ratio.hard ?? 0 };
+  const total = (r.easy + r.medium + r.hard) || 1;
+  const raw = {
+    easy: (poolSize * r.easy) / total,
+    medium: (poolSize * r.medium) / total,
+    hard: (poolSize * r.hard) / total,
+  };
+  const base = { easy: Math.floor(raw.easy), medium: Math.floor(raw.medium), hard: Math.floor(raw.hard) };
+  let rem = poolSize - base.easy - base.medium - base.hard;
+  const diffs: ("easy" | "medium" | "hard")[] = ["easy", "medium", "hard"];
+  diffs.sort((a, b) => (raw[b] - base[b]) - (raw[a] - base[a]))
+    .forEach((d) => { if (rem-- > 0) base[d]++; });
+  return base;
+}
 
 const TYPES = [
   { v: "single", label: "Single choice" },
@@ -214,6 +233,7 @@ export default function CBTBuilder() {
   const { ok, err } = useToast();
   const [exam, setExam] = useState<Exam | null>(null);
   const [components, setComponents] = useState<Component[]>([]);
+  const [bank, setBank] = useState<BankSummary | null>(null);
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -227,6 +247,13 @@ export default function CBTBuilder() {
   useEffect(() => {
     api<Component[]>("/api/assessment-components").then(setComponents).catch(() => {});
   }, []);
+  // for pool exams, keep an eye on whether the bank can fill the draw
+  useEffect(() => {
+    if (exam?.source === "pool" && exam.subject_id) {
+      api<BankSummary>(`/api/cbt/bank/summary?subject_id=${exam.subject_id}`)
+        .then(setBank).catch(() => setBank(null));
+    }
+  }, [exam?.source, exam?.subject_id]);
 
   async function setComponent(componentId: string) {
     try {
@@ -242,6 +269,12 @@ export default function CBTBuilder() {
   }
 
   const isDraft = exam.status === "draft";
+  const isPool = exam.source === "pool";
+  const want = isPool ? splitPool(exam.pool_size, exam.difficulty_ratio) : null;
+  const bankEnough = !!(bank && want
+    && bank.easy >= want.easy && bank.medium >= want.medium && bank.hard >= want.hard);
+  // manual exams need attached questions; pool exams need a sufficient bank
+  const canPublish = isPool ? bankEnough : exam.questions.length > 0;
 
   async function publish() {
     setBusy(true);
@@ -279,7 +312,9 @@ export default function CBTBuilder() {
           <h1 className="text-2xl font-bold break-words">{exam.title}</h1>
           <p className="text-ink-soft text-sm mt-1">
             {exam.subject_name ?? "—"} · {exam.class_label ?? "—"} · {exam.duration_minutes} min ·
-            {" "}{exam.question_count} questions · {exam.total_marks} marks
+            {" "}{isPool && isDraft
+              ? `${exam.pool_size} from the bank`
+              : `${exam.question_count} questions · ${exam.total_marks} marks`}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -294,7 +329,10 @@ export default function CBTBuilder() {
             Results
           </Link>
           {isDraft ? (
-            <button onClick={publish} disabled={busy || exam.questions.length === 0}
+            <button onClick={publish} disabled={busy || !canPublish}
+                    title={!canPublish
+                      ? (isPool ? "Add enough questions to the bank first" : "Add at least one question first")
+                      : undefined}
                     className="rounded-md bg-ledger text-white px-4 py-2 text-sm font-medium hover:opacity-90 disabled:opacity-40">
               Publish
             </button>
@@ -349,7 +387,50 @@ export default function CBTBuilder() {
         )}
       </div>
 
-      {/* questions */}
+      {/* pool exams draw from the bank — no questions are attached to the exam itself */}
+      {isPool && (
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold text-ink-soft uppercase tracking-wide">
+            Questions — drawn from the bank
+          </h2>
+          <div className="rounded-lg border border-line bg-card p-4 space-y-3">
+            <p className="text-sm">
+              Each student gets a unique, balanced set of{" "}
+              <span className="font-medium">{exam.pool_size}</span> question{exam.pool_size === 1 ? "" : "s"}
+              {" "}drawn from the {exam.subject_name ?? "subject"} bank when they start.
+            </p>
+            {want && (
+              <p className="text-xs text-ink-soft">
+                Needs <strong>{want.easy}</strong> easy · <strong>{want.medium}</strong> medium ·{" "}
+                <strong>{want.hard}</strong> hard
+                {bank !== null && (
+                  <> — bank has {bank.easy} · {bank.medium} · {bank.hard} ({bank.total} total){" "}
+                    {bankEnough
+                      ? <span className="text-ledger font-medium">✓ enough to publish</span>
+                      : <span className="text-sanction font-medium">— add more before publishing</span>}
+                  </>
+                )}
+                {bank === null && " — checking the bank…"}
+              </p>
+            )}
+            {isDraft && (
+              <a href="/dashboard/cbt/bank"
+                 className="inline-block rounded-md border border-ink text-ink px-4 py-2 text-sm font-medium hover:bg-ink hover:text-white">
+                Manage question bank →
+              </a>
+            )}
+          </div>
+          {isDraft && !bankEnough && bank !== null && (
+            <p className="text-sm rounded-lg border border-sanction/30 bg-sanction/5 text-ink-soft p-3">
+              The bank doesn&apos;t yet hold enough questions for this draw, so Publish is disabled.
+              Add questions to the bank (you can bulk-import a Word or PDF), then come back here to publish.
+            </p>
+          )}
+        </section>
+      )}
+
+      {/* manual exams: author questions directly on the exam */}
+      {!isPool && (
       <section className="space-y-3">
         <h2 className="text-sm font-semibold text-ink-soft uppercase tracking-wide">
           Questions ({exam.questions.length})
@@ -402,6 +483,7 @@ export default function CBTBuilder() {
           </button>
         ))}
       </section>
+      )}
     </div>
   );
 }
