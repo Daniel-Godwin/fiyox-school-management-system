@@ -668,15 +668,23 @@ async def sync_exam_scores(exam_id: str, db: DbDep,
         CBTAttempt.status == ATTEMPT_SUBMITTED))).scalars().all()
     students = {s.id: s for s in (await db.execute(select(Student).where(
         Student.school_id == school_id))).scalars().all()}
-    recorded = 0
+    # one score per student = their BEST submitted attempt (so a retake or a
+    # 0-scoring auto-submit can't overwrite a higher earlier mark)
+    best_by_student: dict[str, CBTAttempt] = {}
     for a in attempts:
-        st = students.get(a.student_id)
+        cur = best_by_student.get(a.student_id)
+        if cur is None or _attempt_ratio(a) > _attempt_ratio(cur):
+            best_by_student[a.student_id] = a
+    recorded = 0
+    for sid, a in best_by_student.items():
+        st = students.get(sid)
         if st is None:
             continue
         if await _record_to_scoresheet(db, ex, st, a.score, a.max_score, user.id):
             recorded += 1
     await db.commit()
-    return {"submitted": len(attempts), "recorded": recorded}
+    return {"submitted": len(attempts), "students": len(best_by_student),
+            "recorded": recorded}
 
 
 # ==================================================================
@@ -858,6 +866,11 @@ async def save_answers(attempt_id: str, payload: SubmitIn, db: DbDep,
     return {"saved": True}
 
 
+def _attempt_ratio(a: CBTAttempt) -> float:
+    """Fraction scored on a sitting (0..1); a blank/zero sitting ranks lowest."""
+    return (a.score / a.max_score) if a.max_score else 0.0
+
+
 async def _record_to_scoresheet(db, ex: CBTExam, st: Student,
                                 score: float, max_score: float,
                                 actor_id: str) -> bool:
@@ -911,7 +924,16 @@ async def _grade_and_close(db, school_id: str, ex: CBTExam, st: Student,
     a.submitted_at = _now()
     a.status = ATTEMPT_SUBMITTED
     a.auto_submitted = bool(auto)
-    recorded = await _record_to_scoresheet(db, ex, st, score, max_score, actor_id)
+    # Record the student's BEST submitted attempt, not just this one — a retake
+    # (or a 0-scoring auto-submit after a good sitting) must never wipe a higher
+    # earlier mark on the result sheet.
+    prior = (await db.execute(select(CBTAttempt).where(
+        CBTAttempt.school_id == school_id, CBTAttempt.exam_id == ex.id,
+        CBTAttempt.student_id == a.student_id,
+        CBTAttempt.status == ATTEMPT_SUBMITTED,
+        CBTAttempt.id != a.id))).scalars().all()
+    best = max([a, *prior], key=_attempt_ratio)
+    recorded = await _record_to_scoresheet(db, ex, st, best.score, best.max_score, actor_id)
     return score, max_score, recorded
 
 
