@@ -51,6 +51,30 @@ async def test_students_cannot_open_the_monitor(ctx):
     assert (await client.get(f"/api/cbt/exams/{exam}/monitor", headers=shdr)).status_code == 403
 
 
+async def test_violation_log_lists_each_event(ctx):
+    client, ids = ctx
+    thdr = await _teacher(client)
+    exam = await _make_exam(client, ids, thdr, proctored=True, max_violations=5)
+    await _add_questions(client, thdr, exam)
+    assert (await client.post(f"/api/cbt/exams/{exam}/publish", headers=thdr)).status_code == 200
+
+    shdr = await _student_login(client, ids, 0)
+    aid = (await client.post(f"/api/cbt/exams/{exam}/start", headers=shdr)).json()["attempt_id"]
+    for kind in ("tab_switch", "screenshot"):
+        await client.post(f"/api/cbt/attempts/{aid}/violation", headers=shdr,
+                          json={"kind": kind})
+
+    log = (await client.get(f"/api/cbt/attempts/{aid}/violations", headers=thdr)).json()
+    assert log["count"] == 2
+    kinds = {v["kind"] for v in log["violations"]}
+    assert kinds == {"tab_switch", "screenshot"}
+    assert all(v["at"] for v in log["violations"])
+
+    # students cannot read the proctor log
+    assert (await client.get(f"/api/cbt/attempts/{aid}/violations",
+                             headers=shdr)).status_code == 403
+
+
 async def test_force_submit_on_finished_attempt_is_409(ctx):
     client, ids = ctx
     thdr = await _teacher(client)

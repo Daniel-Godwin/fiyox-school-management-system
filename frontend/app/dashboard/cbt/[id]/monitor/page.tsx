@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
@@ -31,12 +31,26 @@ const STATUS: Record<string, { label: string; cls: string }> = {
   submitted: { label: "Submitted", cls: "bg-ledger/10 text-ledger" },
 };
 
+type Violation = { kind: string; detail: string; at: string };
+const KIND: Record<string, string> = {
+  tab_switch: "Left the test (tab / app switch)",
+  blur: "Window lost focus",
+  screenshot: "Screenshot attempt",
+  fullscreen_exit: "Exited full screen",
+};
+function kindLabel(k: string) { return KIND[k] ?? k.replace(/_/g, " "); }
+function when(iso: string) {
+  try { return new Date(iso).toLocaleTimeString(); } catch { return iso; }
+}
+
 export default function ProctorMonitor() {
   const { id } = useParams<{ id: string }>();
   const { ok, err } = useToast();
   const [mon, setMon] = useState<Monitor | null>(null);
   const [fatal, setFatal] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [openLog, setOpenLog] = useState<string | null>(null);
+  const [logs, setLogs] = useState<Record<string, Violation[]>>({});
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const load = useCallback(async () => {
@@ -63,6 +77,15 @@ export default function ProctorMonitor() {
       await load();
     } catch (e) { err(e instanceof ApiError ? e.message : "Could not extend time"); }
     finally { setBusy(null); }
+  }
+
+  async function toggleLog(attemptId: string) {
+    if (openLog === attemptId) { setOpenLog(null); return; }
+    setOpenLog(attemptId);
+    try {
+      const r = await api<{ violations: Violation[] }>(`/api/cbt/attempts/${attemptId}/violations`);
+      setLogs((m) => ({ ...m, [attemptId]: r.violations }));
+    } catch (e) { err(e instanceof ApiError ? e.message : "Could not load the log"); }
   }
 
   async function forceSubmit(attemptId: string, name: string) {
@@ -131,8 +154,8 @@ export default function ProctorMonitor() {
           </thead>
           <tbody>
             {mon.students.map((r) => (
-              <tr key={r.student_id}
-                  className={`border-t border-line ${r.flagged ? "bg-sanction/5" : ""}`}>
+              <React.Fragment key={r.student_id}>
+              <tr className={`border-t border-line ${r.flagged ? "bg-sanction/5" : ""}`}>
                 <td className="px-3 py-2 font-medium">{r.name}</td>
                 <td className="px-3 py-2">
                   <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS[r.status].cls}`}>
@@ -146,8 +169,11 @@ export default function ProctorMonitor() {
                   {clock(r.remaining)}
                 </td>
                 <td className="px-3 py-2 text-right">
-                  {r.violations > 0
-                    ? <span className="text-sanction font-semibold">{r.violations}</span>
+                  {r.violations > 0 && r.attempt_id
+                    ? <button onClick={() => toggleLog(r.attempt_id!)}
+                              className="text-sanction font-semibold underline underline-offset-2">
+                        {r.violations} {openLog === r.attempt_id ? "▴" : "▾"}
+                      </button>
                     : <span className="text-ink-soft">0</span>}
                 </td>
                 <td className="px-3 py-2 text-right whitespace-nowrap">
@@ -165,6 +191,28 @@ export default function ProctorMonitor() {
                   ) : <span className="text-ink-soft text-xs">—</span>}
                 </td>
               </tr>
+              {openLog === r.attempt_id && (
+                <tr className="bg-sanction/5 border-t border-line">
+                  <td colSpan={6} className="px-3 py-2">
+                    {!logs[r.attempt_id!] ? (
+                      <p className="text-xs text-ink-soft">Loading log…</p>
+                    ) : logs[r.attempt_id!].length === 0 ? (
+                      <p className="text-xs text-ink-soft">No detailed events recorded.</p>
+                    ) : (
+                      <ul className="text-xs text-ink-soft space-y-1">
+                        {logs[r.attempt_id!].map((v, i) => (
+                          <li key={i} className="flex items-center gap-2">
+                            <span className="text-sanction">●</span>
+                            <span className="font-medium text-ink">{kindLabel(v.kind)}</span>
+                            <span>· {when(v.at)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </td>
+                </tr>
+              )}
+              </React.Fragment>
             ))}
             {mon.students.length === 0 && (
               <tr><td colSpan={6} className="px-3 py-6 text-center text-ink-soft">No students in this class.</td></tr>
