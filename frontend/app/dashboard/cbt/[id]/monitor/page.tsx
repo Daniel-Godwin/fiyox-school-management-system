@@ -43,6 +43,28 @@ function when(iso: string) {
   try { return new Date(iso).toLocaleTimeString(); } catch { return iso; }
 }
 
+type ExamViolation = {
+  student: string; admission_number: string; attempt_no: number;
+  kind: string; detail: string; at: string;
+};
+function downloadCsv(title: string, rows: ExamViolation[]) {
+  const esc = (s: unknown) => `"${String(s ?? "").replace(/"/g, '""')}"`;
+  const head = ["Student", "Admission no", "Attempt", "Event", "Detail", "Time"];
+  const lines = [head.map(esc).join(",")];
+  for (const r of rows) {
+    lines.push([r.student, r.admission_number, r.attempt_no, kindLabel(r.kind),
+      r.detail, (() => { try { return new Date(r.at).toLocaleString(); } catch { return r.at; } })()]
+      .map(esc).join(","));
+  }
+  const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${title.replace(/[^\w.-]+/g, "_")}_proctor_log.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
 export default function ProctorMonitor() {
   const { id } = useParams<{ id: string }>();
   const { ok, err } = useToast();
@@ -76,6 +98,18 @@ export default function ProctorMonitor() {
       ok("Added 5 minutes");
       await load();
     } catch (e) { err(e instanceof ApiError ? e.message : "Could not extend time"); }
+    finally { setBusy(null); }
+  }
+
+  async function exportLog() {
+    setBusy("export");
+    try {
+      const r = await api<{ exam_title: string; count: number; violations: ExamViolation[] }>(
+        `/api/cbt/exams/${id}/violations`);
+      if (r.count === 0) { ok("No flagged events to export yet."); return; }
+      downloadCsv(r.exam_title, r.violations);
+      ok(`Exported ${r.count} event${r.count === 1 ? "" : "s"}.`);
+    } catch (e) { err(e instanceof ApiError ? e.message : "Could not export the log"); }
     finally { setBusy(null); }
   }
 
@@ -126,10 +160,16 @@ export default function ProctorMonitor() {
             {mon.exam.proctored && <span className="text-sanction"> · proctored</span>}
           </p>
         </div>
-        <Link href={`/dashboard/cbt/${id}/results`}
-              className="shrink-0 self-start rounded-md border border-line px-4 py-2 text-sm font-medium hover:border-ink">
-          Results
-        </Link>
+        <div className="shrink-0 self-start flex items-center gap-2">
+          <button onClick={exportLog} disabled={busy === "export"}
+                  className="rounded-md border border-line px-4 py-2 text-sm font-medium hover:border-ink disabled:opacity-50">
+            {busy === "export" ? "Exporting…" : "Export log (CSV)"}
+          </button>
+          <Link href={`/dashboard/cbt/${id}/results`}
+                className="rounded-md border border-line px-4 py-2 text-sm font-medium hover:border-ink">
+            Results
+          </Link>
+        </div>
       </header>
 
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">

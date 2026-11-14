@@ -75,6 +75,29 @@ async def test_violation_log_lists_each_event(ctx):
                              headers=shdr)).status_code == 403
 
 
+async def test_exam_wide_violation_export(ctx):
+    client, ids = ctx
+    thdr = await _teacher(client)
+    exam = await _make_exam(client, ids, thdr, proctored=True, max_violations=5)
+    await _add_questions(client, thdr, exam)
+    assert (await client.post(f"/api/cbt/exams/{exam}/publish", headers=thdr)).status_code == 200
+
+    shdr = await _student_login(client, ids, 0)
+    aid = (await client.post(f"/api/cbt/exams/{exam}/start", headers=shdr)).json()["attempt_id"]
+    for kind in ("tab_switch", "screenshot", "blur"):
+        await client.post(f"/api/cbt/attempts/{aid}/violation", headers=shdr,
+                          json={"kind": kind})
+
+    exp = (await client.get(f"/api/cbt/exams/{exam}/violations", headers=thdr)).json()
+    assert exp["count"] == 3
+    assert {v["kind"] for v in exp["violations"]} == {"tab_switch", "screenshot", "blur"}
+    assert all(v["student"] and v["at"] for v in exp["violations"])
+
+    # students cannot export the proctor log
+    assert (await client.get(f"/api/cbt/exams/{exam}/violations",
+                             headers=shdr)).status_code == 403
+
+
 async def test_force_submit_on_finished_attempt_is_409(ctx):
     client, ids = ctx
     thdr = await _teacher(client)
