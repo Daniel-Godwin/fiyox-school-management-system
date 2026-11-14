@@ -109,6 +109,38 @@ async def test_pool_publishes_from_a_skewed_bank(ctx):
     assert r.json()["question_count"] == 5
 
 
+async def test_fill_manual_exam_from_bank(ctx):
+    """A manual (write-my-own) draft test can be filled straight from the bank
+    and then published like any other manual test."""
+    client, ids = ctx
+    hdr = await _teacher(client)
+    exam = await _make_exam(client, ids, hdr, source="manual")
+    await _add_bank(client, hdr, ids, "easy", 3)
+    await _add_bank(client, hdr, ids, "medium", 3)
+    await _add_bank(client, hdr, ids, "hard", 2)
+
+    r = await client.post(f"/api/cbt/exams/{exam}/questions/from-bank",
+                          headers=hdr, json={"count": 5})
+    assert r.status_code == 200, r.text
+    assert r.json()["added"] == 5
+
+    # the exam now has real attached questions and publishes normally
+    detail = (await client.get(f"/api/cbt/exams/{exam}", headers=hdr)).json()
+    assert len(detail["questions"]) == 5
+    pub = await client.post(f"/api/cbt/exams/{exam}/publish", headers=hdr)
+    assert pub.status_code == 200, pub.text
+    assert pub.json()["question_count"] == 5
+
+
+async def test_fill_from_bank_needs_a_stocked_bank(ctx):
+    client, ids = ctx
+    hdr = await _teacher(client)
+    exam = await _make_exam(client, ids, hdr, source="manual")
+    r = await client.post(f"/api/cbt/exams/{exam}/questions/from-bank",
+                          headers=hdr, json={"count": 5})
+    assert r.status_code == 409  # empty bank for this subject
+
+
 async def test_bank_rejects_bad_difficulty(ctx):
     client, ids = ctx
     hdr = await _teacher(client)
