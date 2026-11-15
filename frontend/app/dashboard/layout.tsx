@@ -208,10 +208,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </button>
       </div>
     )}
-    <div className="min-h-screen md:flex bg-paper">
+    <div className="min-h-screen md:h-screen md:overflow-hidden md:flex bg-paper">
       {/* ---- desktop sidebar ---- */}
       <aside
-        className="hidden md:flex md:flex-col shrink-0 self-start sticky top-0 h-screen bg-ink text-white transition-[width] duration-200 ease-out"
+        className="hidden md:flex md:flex-col shrink-0 md:h-full bg-ink text-white transition-[width] duration-200 ease-out"
         style={{ width: collapsed ? 72 : 244 }}
       >
         <div className={`flex items-center gap-2 py-5 ${collapsed ? "justify-center px-2" : "px-5"}`}>
@@ -256,7 +256,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       </aside>
 
       {/* ---- content column ---- */}
-      <div className="flex-1 min-w-0 flex flex-col">
+      <div className="flex-1 min-w-0 flex flex-col md:h-full md:overflow-hidden">
         {/* phone/tablet top bar */}
         <header className="md:hidden sticky top-0 z-40 flex items-center justify-between bg-ink text-white px-4 py-3 shadow-sm">
           <div className="flex items-center gap-3">
@@ -277,7 +277,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </button>
         </header>
 
-        <main className="flex-1 p-4 sm:p-5 md:p-8 max-w-full overflow-x-hidden">
+        <main className="flex-1 p-4 sm:p-5 md:p-8 max-w-full overflow-x-hidden md:overflow-y-auto">
           {user.must_change_password ? (
             <ForcePasswordChange onDone={refreshUser} />
           ) : (
