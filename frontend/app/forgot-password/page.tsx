@@ -54,8 +54,10 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center p-4">
-      <div className="w-full max-w-sm">
+    <main className="relative min-h-screen flex items-center justify-center p-4 overflow-hidden bg-gradient-to-br from-paper via-white to-[#eaeef4]">
+      <div className="fiyox-float pointer-events-none absolute -top-28 -left-24 h-72 w-72 rounded-full bg-ink/5 blur-3xl" />
+      <div className="fiyox-float--2 pointer-events-none absolute -bottom-28 -right-20 h-80 w-80 rounded-full bg-brass/10 blur-3xl" />
+      <div className="relative w-full max-w-sm">
         <div className="bg-ink text-white rounded-t-xl px-6 pt-6 pb-5 relative overflow-hidden">
           <div className="absolute top-0 right-0 w-16 h-16 bg-brass/90 [clip-path:polygon(100%_0,0_0,100%_100%)]" />
           <p className="text-brass text-[11px] tracking-[0.25em] uppercase">Password reset</p>
