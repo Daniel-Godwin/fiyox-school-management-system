@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { api, me, ApiError, User, ROLE_LABEL } from "@/lib/api";
 import PasswordStrength from "@/components/PasswordStrength";
+import { PageHeader } from "@/components/ui";
+import NavIcon from "@/components/NavIcons";
 
 type Availability = { phone: boolean; email: boolean; online_payments: boolean };
 
@@ -102,12 +104,9 @@ export default function AccountPage() {
 
   return (
     <div className="space-y-5 max-w-md">
-      <header>
-        <h1 className="text-2xl font-semibold">Account</h1>
-        <p className="text-sm text-ink-soft mt-1">
-          Verify your email and change your password.
-        </p>
-      </header>
+      <PageHeader icon={<NavIcon name="account" className="h-5 w-5" />}
+        title="Account"
+        subtitle="Verify your email and change your password." />
 
       {/* ---- profile header ---- */}
       {user && (

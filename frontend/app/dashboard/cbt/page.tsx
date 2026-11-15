@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api, me } from "@/lib/api";
 import { Kpi, BRAND as C } from "@/components/Panels";
+import { PageHeader } from "@/components/ui";
+import NavIcon from "@/components/NavIcons";
 
 type Me = { role: string };
 
@@ -81,13 +83,9 @@ export default function CBTLanding() {
   if (user.role === "student") {
     return (
       <div className="max-w-3xl space-y-6">
-        <header>
-          <h1 className="text-2xl font-bold">My tests</h1>
-          <p className="text-ink-soft text-sm mt-1">
-            Computer-based tests set for your class. Each one is timed — once you
-            start, the clock keeps running.
-          </p>
-        </header>
+        <PageHeader icon={<NavIcon name="cbt" className="h-5 w-5" />}
+          title="My tests"
+          subtitle="Computer-based tests set for your class. Each one is timed — once you start, the clock keeps running." />
 
         {avail && avail.length > 0 && (
           <div className="grid grid-cols-3 gap-3 fiyox-rise">
@@ -157,17 +155,13 @@ export default function CBTLanding() {
   const canAuthor = user.role === "teacher" || user.role === "school_admin" || user.role === "super_admin";
   return (
     <div className="max-w-4xl space-y-6">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-bold">Computer-based tests</h1>
-          <p className="text-ink-soft text-sm mt-1">
-            {canAuthor
-              ? "Build timed objective tests, publish them to a class, and let Fiyox mark every sitting automatically."
-              : "Oversight of every test set in the school, and how each class performed."}
-          </p>
-        </div>
-        {canAuthor && (
-          <div className="shrink-0 flex items-center gap-2">
+      <PageHeader icon={<NavIcon name="cbt" className="h-5 w-5" />}
+        title="Computer-based tests"
+        subtitle={canAuthor
+          ? "Build timed objective tests, publish them to a class, and let Fiyox mark every sitting automatically."
+          : "Oversight of every test set in the school, and how each class performed."}
+        actions={canAuthor && (
+          <>
             <Link href="/dashboard/cbt/bank"
                   className="flex-1 sm:flex-none text-center rounded-md border border-line px-4 py-2 text-sm font-medium hover:border-ink">
               Question bank
@@ -176,9 +170,8 @@ export default function CBTLanding() {
                   className="flex-1 sm:flex-none text-center rounded-md bg-ink text-white px-4 py-2 text-sm font-medium hover:bg-ink-soft">
               + New test
             </Link>
-          </div>
-        )}
-      </header>
+          </>
+        )} />
 
       {exams && exams.length > 0 && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 fiyox-rise">

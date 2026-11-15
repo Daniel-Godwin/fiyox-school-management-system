@@ -5,6 +5,8 @@ import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 import { Kpi, BRAND as C } from "@/components/Panels";
+import { PageHeader } from "@/components/ui";
+import NavIcon from "@/components/NavIcons";
 
 type Applicant = {
   id: string; application_number: string; name: string; gender: string;
@@ -164,16 +166,15 @@ export default function AdmissionsPage() {
 
   return (
     <div className="max-w-4xl space-y-6">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Admissions</h1>
-          <p className="text-ink-soft text-sm mt-1">Applications from your school’s public admissions link.</p>
-        </div>
-        <Link href="/dashboard/admissions/test"
-              className="shrink-0 rounded-md border border-ink text-ink px-4 py-2 text-sm font-medium hover:bg-ink hover:text-white">
-          Entrance test
-        </Link>
-      </header>
+      <PageHeader icon={<NavIcon name="admissions" className="h-5 w-5" />}
+        title="Admissions"
+        subtitle="Applications from your school’s public admissions link."
+        actions={
+          <Link href="/dashboard/admissions/test"
+                className="shrink-0 rounded-md border border-ink text-ink px-4 py-2 text-sm font-medium hover:bg-ink hover:text-white">
+            Entrance test
+          </Link>
+        } />
 
       {/* funnel summary */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 fiyox-rise">

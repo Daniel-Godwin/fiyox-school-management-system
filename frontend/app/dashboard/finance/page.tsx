@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
 import { useToast } from "@/components/Toast";
+import { PageHeader } from "@/components/ui";
+import NavIcon from "@/components/NavIcons";
 
 type Overview = {
   start: string; end: string;
@@ -80,13 +82,12 @@ export default function FinancePage() {
 
   return (
     <div className="max-w-4xl space-y-6">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Finance</h1>
-          <p className="text-ink-soft text-sm mt-1">This month ({ov.start} to {ov.end}).</p>
-        </div>
-        <Link href="/dashboard/finance/payroll" className="shrink-0 rounded-md border border-ink text-ink px-4 py-2 text-sm font-medium hover:bg-ink hover:text-white">Payroll</Link>
-      </header>
+      <PageHeader icon={<NavIcon name="finance" className="h-5 w-5" />}
+        title="Finance"
+        subtitle={`This month (${ov.start} to ${ov.end}).`}
+        actions={
+          <Link href="/dashboard/finance/payroll" className="shrink-0 rounded-md border border-ink text-ink px-4 py-2 text-sm font-medium hover:bg-ink hover:text-white">Payroll</Link>
+        } />
 
       {/* overview */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

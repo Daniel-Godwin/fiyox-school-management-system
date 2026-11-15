@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { Kpi, BRAND as C } from "@/components/Panels";
+import { PageHeader } from "@/components/ui";
+import NavIcon from "@/components/NavIcons";
 
 type Arm = { id: string; label: string };
 type Term = { id: string; name: string; session: string; is_current: boolean };
@@ -134,12 +136,9 @@ export default function EndOfTermPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">End of term</h1>
-        <p className="text-sm text-ink-soft mt-1">
-          Students who need attention, report-card comments, and end-of-session promotion.
-        </p>
-      </header>
+      <PageHeader icon={<NavIcon name="endterm" className="h-5 w-5" />}
+        title="End of term"
+        subtitle="Students who need attention, report-card comments, and end-of-session promotion." />
 
       <div className="flex flex-wrap items-end gap-3">
         <label className="block">

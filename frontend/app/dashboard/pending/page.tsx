@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { discard, flush, isOnline, onSyncChange, pendingOps } from "@/lib/offline/sync";
 import type { OutboxOp } from "@/lib/offline/db";
+import { PageHeader } from "@/components/ui";
+import NavIcon from "@/components/NavIcons";
 
 function timeAgo(ts: number): string {
   const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
@@ -44,13 +46,9 @@ export default function PendingChangesPage() {
 
   return (
     <div className="space-y-5 max-w-2xl">
-      <header>
-        <h1 className="text-2xl font-semibold">Pending changes</h1>
-        <p className="text-sm text-ink-soft mt-1">
-          Work you saved while offline waits here and syncs automatically when
-          you&apos;re back online — even if you close the app. You can also sync now.
-        </p>
-      </header>
+      <PageHeader icon={<NavIcon name="pending" className="h-5 w-5" />}
+        title="Pending changes"
+        subtitle="Work you saved while offline waits here and syncs automatically when you're back online — even if you close the app. You can also sync now." />
 
       <div className="flex items-center gap-3">
         <span

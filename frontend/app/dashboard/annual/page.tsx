@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, openPdf, ApiError } from "@/lib/api";
 import { useToast } from "@/components/Toast";
+import { PageHeader } from "@/components/ui";
+import NavIcon from "@/components/NavIcons";
 
 type Session = { id: string; name: string; is_current: boolean };
 type Arm = { id: string; label: string };
@@ -56,12 +58,9 @@ export default function AnnualReportsPage() {
 
   return (
     <div className="max-w-4xl space-y-6">
-      <header>
-        <h1 className="text-2xl font-bold">Annual reports</h1>
-        <p className="text-ink-soft text-sm mt-1">
-          The cumulative end-of-session result — each term combined into one annual average, grade and position.
-        </p>
-      </header>
+      <PageHeader icon={<NavIcon name="annual" className="h-5 w-5" />}
+        title="Annual reports"
+        subtitle="The cumulative end-of-session result — each term combined into one annual average, grade and position." />
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <label className="block">

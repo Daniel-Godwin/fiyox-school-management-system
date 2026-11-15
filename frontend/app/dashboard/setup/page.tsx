@@ -5,6 +5,8 @@ import { api, ApiError, downloadFile } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 import { BRAND as C } from "@/components/Panels";
 import { ProgressRing } from "@/components/Charts";
+import { PageHeader } from "@/components/ui";
+import NavIcon from "@/components/NavIcons";
 
 type Term = {
   id: string; name: string; session: string; is_current: boolean;
@@ -489,13 +491,9 @@ export default function SetupPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">School setup</h1>
-        <p className="text-sm text-ink-soft mt-1">
-          Sessions, terms, classes, arms, subjects and the score columns. Do this
-          once — everything else in Fiyox depends on it.
-        </p>
-      </header>
+      <PageHeader icon={<NavIcon name="setup" className="h-5 w-5" />}
+        title="School setup"
+        subtitle="Sessions, terms, classes, arms, subjects and the score columns. Do this once — everything else in Fiyox depends on it." />
 
       {/* setup readiness */}
       {(() => {

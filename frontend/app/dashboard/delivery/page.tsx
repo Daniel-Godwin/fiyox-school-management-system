@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, ApiError, me } from "@/lib/api";
 import { Kpi, BRAND as C } from "@/components/Panels";
+import { PageHeader } from "@/components/ui";
+import NavIcon from "@/components/NavIcons";
 
 type ChannelStatus = { provider: string; live: boolean; message: string;
                        sender_id?: string | null; sender?: string | null };
@@ -79,14 +81,10 @@ export default function DeliveryLogPage() {
 
   return (
     <div className="space-y-5 max-w-3xl">
-      <header className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">Delivery log</h1>
-          <p className="text-sm text-ink-soft mt-1">
-            Every SMS and email the system tries to send, and what happened to it.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
+      <PageHeader icon={<NavIcon name="delivery" className="h-5 w-5" />}
+        title="Delivery log"
+        subtitle="Every SMS and email the system tries to send, and what happened to it."
+        actions={<>
           <button onClick={load} className="rounded-md border border-line px-3 py-1.5 text-sm hover:bg-paper">
             Refresh
           </button>
@@ -96,8 +94,7 @@ export default function DeliveryLogPage() {
               Clear log
             </button>
           )}
-        </div>
-      </header>
+        </>} />
 
       {clearOpen && (
         <div className="rounded-xl border border-sanction/30 bg-sanction/5 p-4 space-y-3">

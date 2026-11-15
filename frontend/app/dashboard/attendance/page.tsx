@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError } from "@/lib/api";
 import { cachedGet, queuedPost, putCache } from "@/lib/offline/offlineApi";
 import { BRAND as C } from "@/components/Panels";
+import { PageHeader } from "@/components/ui";
+import NavIcon from "@/components/NavIcons";
 
 type Arm = { id: string; label: string };
 type Student = {
@@ -129,13 +131,9 @@ export default function AttendancePage() {
 
   return (
     <div className="space-y-5">
-      <header>
-        <h1 className="text-2xl font-semibold">Attendance</h1>
-        <p className="text-sm text-ink-soft mt-1">
-          Take the daily register. Re-saving a day corrects it — every correction
-          is recorded in the audit trail.
-        </p>
-      </header>
+      <PageHeader icon={<NavIcon name="attendance" className="h-5 w-5" />}
+        title="Attendance"
+        subtitle="Take the daily register. Re-saving a day corrects it — every correction is recorded in the audit trail." />
 
       <div className="flex flex-wrap items-end gap-3">
         <label className="block">
