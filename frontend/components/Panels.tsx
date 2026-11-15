@@ -17,8 +17,9 @@ export function Kpi({
       {hint && <p className="text-xs text-ink-soft mt-1">{hint}</p>}
     </>
   );
-  const cls = "group relative bg-card border border-line rounded-xl p-4 overflow-hidden " +
-    "transition-transform duration-200 hover:-translate-y-0.5 hover:shadow-md";
+  const cls = "group relative bg-card border border-line rounded-xl p-4 overflow-hidden card " +
+    (href ? "card-interactive " : "") +
+    "transition-transform duration-200 hover:-translate-y-0.5";
   return href
     ? <a href={href} className={`${cls} block`}>{inner}</a>
     : <div className={cls}>{inner}</div>;
@@ -28,7 +29,7 @@ export function Card({
   title, children, className = "", right,
 }: { title?: string; children: React.ReactNode; className?: string; right?: React.ReactNode }) {
   return (
-    <div className={`bg-card border border-line rounded-xl p-5 ${className}`}>
+    <div className={`bg-card border border-line rounded-xl p-5 card ${className}`}>
       {(title || right) && (
         <div className="flex items-center justify-between mb-3">
           {title && <p className="text-xs text-ink-soft uppercase tracking-wide">{title}</p>}
