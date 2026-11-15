@@ -4,6 +4,15 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api, me, User } from "@/lib/api";
 import OwnerDashboard from "@/components/OwnerDashboard";
+import { StatTile } from "@/components/ui";
+
+const I = {
+  students: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /></svg>,
+  fees: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M2 7h20v12H2zM2 11h20" /><circle cx="12" cy="15" r="1.5" /></svg>,
+  alert: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /></svg>,
+  check: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><path d="M22 4 12 14.01l-3-3" /></svg>,
+  cal: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M8 2v4M16 2v4M3 10h18" /></svg>,
+};
 
 type Student = { id: string };
 type Term = { id: string; name: string; session: string; is_current: boolean;
@@ -19,27 +28,6 @@ type ApprovalQueue = { count: number; arms: ApprovalArm[] };
 
 function naira(n: number) {
   return "₦" + n.toLocaleString("en-NG", { maximumFractionDigits: 0 });
-}
-
-function StatCard({ href, label, value, hint, tone = "ink" }: {
-  href?: string; label: string; value: string; hint?: string;
-  tone?: "ink" | "ledger" | "brass" | "sanction";
-}) {
-  const toneClass = {
-    ink: "text-ink", ledger: "text-ledger",
-    brass: "text-brass-ink", sanction: "text-sanction",
-  }[tone];
-  const inner = (
-    <>
-      <p className="text-xs uppercase tracking-wide text-ink-soft">{label}</p>
-      <p className={`display text-3xl font-bold mt-1 tabular ${toneClass}`}>{value}</p>
-      {hint && <p className="text-sm text-ink-soft mt-2">{hint}</p>}
-    </>
-  );
-  const cls = "block bg-card border border-line rounded-xl p-5 card";
-  return href
-    ? <Link href={href} className={`${cls} card-interactive`}>{inner}</Link>
-    : <div className={cls}>{inner}</div>;
 }
 
 function QuickLink({ href, label }: { href: string; label: string }) {
@@ -125,21 +113,34 @@ export default function Overview() {
   const isPrincipal = user.role === "principal";
   const family = user.role === "parent" || user.role === "student";
 
+  const today = new Date().toLocaleDateString("en-GB", {
+    weekday: "long", day: "numeric", month: "long", year: "numeric" });
+
   return (
-    <div className="max-w-4xl space-y-8">
-      <header>
-        <h1 className="text-2xl font-bold">Welcome, {user.first_name}</h1>
-        <p className="text-ink-soft text-sm mt-1">
-          {term
-            ? <>You are in the <b>{term.name} term</b>, {term.session} session.</>
-            : (staff || isPrincipal)
-              ? "Here is where your school's day-to-day work happens."
-              : "Follow your ward's results, fees and attendance here."}
-          {term?.next_term_begins && (
-            <span className="ml-1">Next term begins {term.next_term_begins}.</span>
+    <div className="max-w-5xl space-y-6">
+      {/* premium hero band */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-ink to-ink-soft p-6 sm:p-8 text-white">
+        <div className="fiyox-float pointer-events-none absolute -right-12 -top-16 h-48 w-48 rounded-full bg-brass/20 blur-3xl" />
+        <div className="fiyox-float--2 pointer-events-none absolute -bottom-20 right-24 h-40 w-40 rounded-full bg-ledger/20 blur-3xl" />
+        <div className="relative">
+          <p className="text-xs uppercase tracking-[0.14em] text-white/55">{today}</p>
+          <h1 className="display text-2xl sm:text-3xl font-bold mt-1.5">Welcome, {user.first_name}</h1>
+          <p className="mt-2 max-w-xl text-sm text-white/80">
+            {term
+              ? <>Your school is in the <b className="text-white">{term.name} term</b> of the {term.session} session.</>
+              : (staff || isPrincipal)
+                ? "This is where your school's day-to-day work happens."
+                : "Follow your ward's results, fees and attendance here."}
+            {term?.next_term_begins && <span className="ml-1 text-white/70">Next term begins {term.next_term_begins}.</span>}
+          </p>
+          {term && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium ring-1 ring-white/15">{term.name} term</span>
+              <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium ring-1 ring-white/15">{term.session} session</span>
+            </div>
           )}
-        </p>
-      </header>
+        </div>
+      </div>
 
       {isAdmin && setup && Object.values(setup).some((done) => !done) && (
         <section className="rounded-xl border border-brass bg-brass/10 p-5">
@@ -180,17 +181,18 @@ export default function Overview() {
 
       {staff && (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          <StatCard href="/dashboard/students" label="Students"
+          <StatTile href="/dashboard/students" label="Students" icon={I.students}
                     value={students?.toLocaleString() ?? "—"}
                     hint="View the register →" />
           {isBursar && fees && (
-            <StatCard href="/dashboard/fees" label="Fees collected"
+            <StatTile href="/dashboard/fees" label="Fees collected" icon={I.fees}
                       value={`${Math.round(fees.collection_rate)}%`}
                       tone={fees.collection_rate >= 70 ? "ledger" : "brass"}
                       hint={`${naira(fees.collected)} of ${naira(fees.expected)} →`} />
           )}
           {atRisk !== null && (
-            <StatCard href="/dashboard/end-of-term" label="Need attention"
+            <StatTile href="/dashboard/end-of-term" label="Need attention"
+                      icon={atRisk === 0 ? I.check : I.alert}
                       value={atRisk.toString()}
                       tone={atRisk === 0 ? "ledger" : "sanction"}
                       hint={atRisk === 0 ? "All students on track" : "Review the register →"} />
@@ -219,15 +221,15 @@ export default function Overview() {
       {isPrincipal && (
         <>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            <StatCard href="/dashboard/students" label="Students"
+            <StatTile href="/dashboard/students" label="Students" icon={I.students}
                       value={students?.toLocaleString() ?? "—"} hint="School roll →" />
             {fees && (
-              <StatCard href="/dashboard/fees" label="Fees collected"
+              <StatTile href="/dashboard/fees" label="Fees collected" icon={I.fees}
                         value={`${Math.round(fees.collection_rate)}%`}
                         tone={fees.collection_rate >= 70 ? "ledger" : "brass"}
                         hint={`${naira(fees.collected)} of ${naira(fees.expected)} →`} />
             )}
-            <StatCard href="/dashboard/results" label="Awaiting approval"
+            <StatTile href="/dashboard/results" label="Awaiting approval" icon={I.check}
                       value={approvals ? approvals.count.toString() : "—"}
                       tone={approvals && approvals.count > 0 ? "brass" : "ledger"}
                       hint={approvals && approvals.count > 0 ? "Review & approve →" : "Nothing waiting"} />
@@ -269,12 +271,12 @@ export default function Overview() {
 
       {family && (
         <div className="grid sm:grid-cols-2 gap-4">
-          <StatCard href="/dashboard/wards" label="My children"
+          <StatTile href="/dashboard/wards" label="My children" icon={I.students}
                     value={wards ? wards.length.toString() : "—"}
                     hint={wards && wards.length > 0
                       ? wards.map((w) => w.name).join(", ")
                       : "View results & fees →"} />
-          <StatCard href="/dashboard/timetable" label="Timetable"
+          <StatTile href="/dashboard/timetable" label="Timetable" icon={I.cal}
                     value="View" hint="This week's lessons →" />
         </div>
       )}
