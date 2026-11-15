@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, ApiError, me, User } from "@/lib/api";
 import { Kpi, BRAND as C } from "@/components/Panels";
+import { PageHeader } from "@/components/ui";
+import NavIcon from "@/components/NavIcons";
 
 // a stable, readable colour per subject so the grid is easy to scan
 const SUBJECT_COLORS = [
@@ -160,14 +162,11 @@ export default function TimetablePage() {
 
   return (
     <div className="space-y-5">
-      <header>
-        <h1 className="text-2xl font-semibold">Timetable</h1>
-        <p className="text-sm text-ink-soft mt-1">
-          {isTeacher
-            ? "Your lessons this week."
-            : "The week's lesson grid. Fiyox refuses any clash — a class cannot be in two lessons at once, and a teacher cannot be in two classrooms at once."}
-        </p>
-      </header>
+      <PageHeader icon={<NavIcon name="timetable" className="h-5 w-5" />}
+        title="Timetable"
+        subtitle={isTeacher
+          ? "Your lessons this week."
+          : "The week's lesson grid. Fiyox refuses any clash — a class cannot be in two lessons at once, and a teacher cannot be in two classrooms at once."} />
 
       {isFamily && multiWard && (
         <div className="flex flex-wrap items-center gap-1.5">

@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError } from "@/lib/api";
 import { cachedGet, queuedPost, putCache } from "@/lib/offline/offlineApi";
 import { Kpi, BRAND as C } from "@/components/Panels";
+import { PageHeader } from "@/components/ui";
+import NavIcon from "@/components/NavIcons";
 
 type Term = { id: string; name: string; session: string; is_current: boolean };
 type Arm = { id: string; label: string };
@@ -228,13 +230,9 @@ export default function ScoreEntryPage() {
 
   return (
     <div className="space-y-5">
-      <header>
-        <h1 className="text-2xl font-semibold">Score entry</h1>
-        <p className="text-sm text-ink-soft mt-1">
-          Pick a term, class and subject, then fill the sheet. Corrections are
-          recorded in the audit trail.
-        </p>
-      </header>
+      <PageHeader icon={<NavIcon name="scores" className="h-5 w-5" />}
+        title="Score entry"
+        subtitle="Pick a term, class and subject, then fill the sheet. Corrections are recorded in the audit trail." />
 
       {/* selectors */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-3xl">

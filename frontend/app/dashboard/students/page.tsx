@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
+import { PageHeader } from "@/components/ui";
+import NavIcon from "@/components/NavIcons";
 
 type Student = {
   id: string;
@@ -140,20 +142,17 @@ export default function StudentsPage() {
 
   return (
     <div className="max-w-4xl">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">Students</h1>
-          <p className="text-ink-soft text-sm mt-1">
-            The school register — {students ? `${students.length} enrolled` : "loading"}.
-          </p>
-        </div>
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search name or admission no."
-          className="rounded-md border border-line bg-white px-3 py-2 text-sm w-64"
-        />
-      </div>
+      <PageHeader icon={<NavIcon name="students" className="h-5 w-5" />}
+        title="Students"
+        subtitle={`The school register — ${students ? `${students.length} enrolled` : "loading"}.`}
+        actions={
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search name or admission no."
+            className="rounded-md border border-line bg-white px-3 py-2 text-sm w-full sm:w-64"
+          />
+        } />
 
       {/* ---- Admit a student ---- */}
       <section className="mt-5 rounded-lg border border-line bg-card">

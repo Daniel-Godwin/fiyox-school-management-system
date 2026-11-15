@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, me } from "@/lib/api";
 import { Donut, ProgressRing, Columns, BarRow } from "@/components/Charts";
+import { PageHeader } from "@/components/ui";
+import NavIcon from "@/components/NavIcons";
 
 type Term = { id: string; name: string; session: string; is_current: boolean };
 type Overview = {
@@ -131,24 +133,21 @@ export default function AnalyticsPage() {
 
   return (
     <div className="max-w-5xl space-y-8">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Analytics</h1>
-          <p className="text-ink-soft text-sm mt-1">
-            {data.scope === "platform"
-              ? `Across all ${data.schools} schools on the platform.`
-              : "A snapshot of your school this term."}
-          </p>
-        </div>
-        <select value={termId} onChange={(e) => setTermId(e.target.value)}
-                className="rounded-md border border-line bg-white px-3 py-2 text-sm">
-          {terms.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name} — {t.session}{t.is_current ? " (current)" : ""}
-            </option>
-          ))}
-        </select>
-      </header>
+      <PageHeader icon={<NavIcon name="analytics" className="h-5 w-5" />}
+        title="Analytics"
+        subtitle={data.scope === "platform"
+          ? `Across all ${data.schools} schools on the platform.`
+          : "A snapshot of your school this term."}
+        actions={
+          <select value={termId} onChange={(e) => setTermId(e.target.value)}
+                  className="rounded-md border border-line bg-white px-3 py-2 text-sm">
+            {terms.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name} — {t.session}{t.is_current ? " (current)" : ""}
+              </option>
+            ))}
+          </select>
+        } />
 
       {/* HEADLINE KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 fiyox-rise">

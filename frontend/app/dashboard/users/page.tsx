@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Kpi, BRAND as C } from "@/components/Panels";
 import { api, ApiError } from "@/lib/api";
+import { PageHeader } from "@/components/ui";
+import NavIcon from "@/components/NavIcons";
 
 type Role = "school_admin" | "bursar" | "teacher" | "parent" | "student";
 type UserRow = {
@@ -358,13 +360,9 @@ export default function UsersPage() {
 
   return (
     <div className="space-y-5">
-      <header>
-        <h1 className="text-2xl font-semibold">Users</h1>
-        <p className="text-sm text-ink-soft mt-1">
-          Create accounts for staff, parents and students. Temporary passwords are
-          shown once — the person changes it under Account after first sign-in.
-        </p>
-      </header>
+      <PageHeader icon={<NavIcon name="users" className="h-5 w-5" />}
+        title="Users"
+        subtitle="Create accounts for staff, parents and students. Temporary passwords are shown once — the person changes it under Account after first sign-in." />
 
       {/* account summary */}
       {users.length > 0 && (

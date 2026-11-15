@@ -5,6 +5,8 @@ import { api, openPdf, User, ApiError } from "@/lib/api";
 import { cachedGet, queuedPost, putCache } from "@/lib/offline/offlineApi";
 import { Kpi, BRAND as C } from "@/components/Panels";
 import { Columns } from "@/components/Charts";
+import { PageHeader } from "@/components/ui";
+import NavIcon from "@/components/NavIcons";
 
 type Term = { id: string; name: string; session: string; is_current: boolean };
 type Arm = { id: string; label: string };
@@ -302,13 +304,9 @@ export default function ResultsPage() {
 
   return (
     <div className="space-y-5">
-      <header>
-        <h1 className="text-2xl font-semibold">Results</h1>
-        <p className="text-sm text-ink-soft mt-1">
-          Compute a class&apos;s results from entered scores, review the ranking,
-          then publish to parents and students.
-        </p>
-      </header>
+      <PageHeader icon={<NavIcon name="results" className="h-5 w-5" />}
+        title="Results"
+        subtitle="Compute a class's results from entered scores, review the ranking, then publish to parents and students." />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl">
         <label className="block">

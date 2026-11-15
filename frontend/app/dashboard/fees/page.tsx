@@ -5,6 +5,8 @@ import { api, openPdf, downloadFile, ApiError } from "@/lib/api";
 import { cachedGet, queuedPost, putCache } from "@/lib/offline/offlineApi";
 import { Kpi, BRAND as C } from "@/components/Panels";
 import { Donut, ProgressRing } from "@/components/Charts";
+import { PageHeader } from "@/components/ui";
+import NavIcon from "@/components/NavIcons";
 
 type Term = { id: string; name: string; session: string; is_current: boolean };
 type Arm = { id: string; label: string };
@@ -477,12 +479,9 @@ export default function FeesPage() {
 
   return (
     <div className="space-y-5">
-      <header>
-        <h1 className="text-2xl font-semibold">Fees</h1>
-        <p className="text-sm text-ink-soft mt-1">
-          Bill a class, record payments as they come in, and see where the term stands.
-        </p>
-      </header>
+      <PageHeader icon={<NavIcon name="fees" className="h-5 w-5" />}
+        title="Fees"
+        subtitle="Bill a class, record payments as they come in, and see where the term stands." />
 
       {/* ---- Fee setup (categories + per-class amounts for this term) ---- */}
       <section className="rounded-lg border border-line bg-card">
