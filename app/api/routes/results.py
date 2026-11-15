@@ -541,6 +541,42 @@ async def _enforce_debt_gate(db, user: User, school_id: str,
                 detail="Result withheld: outstanding school fees for this term")
 
 
+@router.get("/report-cards.pdf", tags=["results"])
+async def class_report_cards_pdf(
+    db: DbDep,
+    user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN, Role.PRINCIPAL))],
+    arm_id: str = Query(...),
+    term_id: str = Query(...),
+):
+    """Every computed report card in one class, merged into a single PDF — so a
+    school prints a whole class at term end instead of one child at a time."""
+    from pypdf import PdfReader, PdfWriter
+    school_id = tenant_scope(user)
+    students = sorted((await db.execute(select(Student).where(
+        Student.school_id == school_id, Student.current_arm_id == arm_id,
+        Student.deleted_at.is_(None)))).scalars().all(),
+        key=lambda s: s.admission_number)
+
+    writer = PdfWriter()
+    included = 0
+    for st in students:
+        data = await build_report_data(db, school_id, st.id, term_id)
+        if not data:
+            continue                      # no computed result for this child — skip
+        reader = PdfReader(BytesIO(build_report_pdf(data)))
+        for page in reader.pages:
+            writer.add_page(page)
+        included += 1
+    if included == 0:
+        raise HTTPException(status_code=404,
+                            detail="No computed results in this class for the term yet.")
+    out = BytesIO()
+    writer.write(out)
+    out.seek(0)
+    return StreamingResponse(out, media_type="application/pdf", headers={
+        "Content-Disposition": f'inline; filename="report_cards_{included}.pdf"'})
+
+
 @router.get("/report/{student_id}/pdf", tags=["results"])
 async def report_pdf(student_id: str, db: DbDep, user: CurrentUser,
                      term_id: str = Query(...)):

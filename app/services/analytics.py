@@ -17,9 +17,10 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.student import Student
-from app.models.academics import ClassArm, SchoolClass
+from app.models.academics import ClassArm, SchoolClass, Subject
 from app.models.results import TermResult, SubjectResult
 from app.models.fees import Invoice, Payment
+from app.models.attendance import Attendance
 from app.models.cbt import CBTExam, CBTAttempt, EXAM_PUBLISHED, ATTEMPT_SUBMITTED
 
 # Nigerian standard: an average at or above this is a pass.
@@ -163,9 +164,47 @@ async def build_overview(db: AsyncSession, school_ids: list[str],
             "average_percent": _mean(pct),
         }
 
+    # ---------- attendance (recorded by day; no term column on the record) ----------
+    att_rows = (await db.execute(
+        select(Attendance.status, func.count()).where(
+            Attendance.school_id.in_(school_ids),
+            Attendance.deleted_at.is_(None)).group_by(Attendance.status))).all()
+    att = {str(s).split(".")[-1].lower(): n for s, n in att_rows}
+    present, late, absent = att.get("present", 0), att.get("late", 0), att.get("absent", 0)
+    att_total = present + late + absent
+    attendance = {
+        "present": present, "late": late, "absent": absent, "total": att_total,
+        # present + late both count as "in school" for the headline rate
+        "rate": round((present + late) / att_total * 100, 1) if att_total else None,
+    }
+
+    # ---------- subject performance (needs a term) ----------
+    subject_performance: list[dict] = []
+    if term_id:
+        srs = list((await db.execute(select(SubjectResult).where(
+            SubjectResult.school_id.in_(school_ids),
+            SubjectResult.term_id == term_id))).scalars().all())
+        if srs:
+            subj_names = {s.id: s.name for s in (await db.execute(select(Subject).where(
+                Subject.school_id.in_(school_ids)))).scalars().all()}
+            by_subj: dict[str, list[float]] = {}
+            for r in srs:
+                by_subj.setdefault(r.subject_id, []).append(r.total)
+            for sid, totals in by_subj.items():
+                passed = [t for t in totals if t >= PASS_MARK]
+                subject_performance.append({
+                    "subject": subj_names.get(sid, "—"),
+                    "average": _mean(totals),
+                    "pass_rate": round(len(passed) / len(totals) * 100, 1) if totals else None,
+                    "results": len(totals),
+                })
+            subject_performance.sort(key=lambda r: (r["average"] or 0), reverse=True)
+
     return {
         "enrolment": enrolment,
         "academics": academics,
         "finance": finance,
         "cbt": cbt,
+        "attendance": attendance,
+        "subject_performance": subject_performance,
     }
