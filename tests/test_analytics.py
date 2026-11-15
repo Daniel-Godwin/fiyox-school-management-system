@@ -69,3 +69,28 @@ async def test_overview_rbac(ctx):
                              params={"term_id": ids["term_id"]})).json()
     assert data["scope"] == "platform"
     assert data["enrolment"]["total_students"] == 3   # the one seeded school
+
+
+async def test_overview_attendance_and_subject_performance(ctx):
+    client, ids = ctx
+    h = await _admin(client)
+    await _compute_results(client, h, ids)
+    th = await headers(client, "teacher@gss-ikeja.ng", "teach123")
+    await client.post("/api/attendance/mark", headers=th, json={
+        "arm_id": ids["arm_id"], "date": "2026-10-20",
+        "records": [
+            {"student_id": ids["student_ids"][0], "status": "present"},
+            {"student_id": ids["student_ids"][1], "status": "present"},
+            {"student_id": ids["student_ids"][2], "status": "absent"},
+        ]})
+    data = (await client.get("/api/analytics/overview", headers=h,
+                             params={"term_id": ids["term_id"]})).json()
+
+    att = data["attendance"]
+    assert att["present"] == 2 and att["absent"] == 1 and att["total"] == 3
+    assert att["rate"] == round(2 / 3 * 100, 1)
+
+    sp = data["subject_performance"]
+    assert len(sp) == 1 and sp[0]["subject"] == "Mathematics"
+    assert sp[0]["results"] == 3 and sp[0]["average"] is not None
+    assert sp[0]["pass_rate"] is not None

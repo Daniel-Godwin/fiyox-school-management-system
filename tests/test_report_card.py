@@ -199,3 +199,28 @@ async def test_branding_upload_and_appears_on_pdf(ctx):
     denied = await client.post("/api/schools/me/branding/logo", headers=th,
                                files={"file": ("l.png", _png_bytes(), "image/png")})
     assert denied.status_code == 403
+
+
+async def test_class_report_cards_bundle(ctx):
+    """Whole-class report cards merge into one PDF for term-end printing."""
+    from tests.conftest import headers
+    client, ids = ctx
+    ah = await headers(client, "admin@gss-ikeja.ng", "admin123")
+    comp = ids["component_ids"]
+    for sid, m in zip(ids["student_ids"], [60, 50, 45]):
+        await client.post("/api/scores", headers=ah, json={
+            "subject_id": ids["subject_id"], "arm_id": ids["arm_id"],
+            "term_id": ids["term_id"], "rows": [{"student_id": sid, "scores": {comp[3]: m}}]})
+    await client.post("/api/results/compute", headers=ah,
+                      json={"arm_id": ids["arm_id"], "term_id": ids["term_id"]})
+
+    r = await client.get("/api/report-cards.pdf", headers=ah, params={
+        "arm_id": ids["arm_id"], "term_id": ids["term_id"]})
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert len(r.content) > 3000            # three cards merged into one file
+
+    # a teacher cannot pull a whole class bundle
+    th = await headers(client, "teacher@gss-ikeja.ng", "teach123")
+    assert (await client.get("/api/report-cards.pdf", headers=th, params={
+        "arm_id": ids["arm_id"], "term_id": ids["term_id"]})).status_code == 403

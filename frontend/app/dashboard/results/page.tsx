@@ -349,6 +349,14 @@ export default function ResultsPage() {
               </button>
             )}
 
+            {isAdmin && hasRows && (
+              <button onClick={() => openPdf(`/api/report-cards.pdf?arm_id=${armId}&term_id=${termId}`)}
+                      disabled={busy !== null}
+                      className="rounded-md border border-ledger text-ledger px-4 py-2 text-sm font-medium hover:bg-ledger hover:text-white disabled:opacity-40">
+                Print all report cards
+              </button>
+            )}
+
             {hasRows && (
               <button onClick={() => openGrid("affective")} disabled={busy !== null}
                       className="rounded-md border border-ink text-ink px-4 py-2 text-sm font-medium hover:bg-ink hover:text-white disabled:opacity-40">

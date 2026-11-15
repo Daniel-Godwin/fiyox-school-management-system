@@ -25,6 +25,12 @@ type Overview = {
     outstanding: number; debtors: number;
   };
   cbt: { published_tests: number; sittings: number; submitted: number; average_percent: number | null };
+  attendance: {
+    present: number; late: number; absent: number; total: number; rate: number | null;
+  };
+  subject_performance: {
+    subject: string; average: number | null; pass_rate: number | null; results: number;
+  }[];
 };
 
 const C = { ink: "#0b1f3a", inkSoft: "#274264", ledger: "#1e7a4f", brass: "#c8a24b", sanction: "#b4232a" };
@@ -120,7 +126,8 @@ export default function AnalyticsPage() {
   }
   if (!data) return null;
 
-  const { enrolment: en, academics: ac, finance: fi, cbt } = data;
+  const { enrolment: en, academics: ac, finance: fi, cbt, attendance: at, subject_performance: sp } = data;
+  const maxSubjAvg = Math.max(1, ...sp.map((s) => s.average ?? 0));
 
   return (
     <div className="max-w-5xl space-y-8">
@@ -218,6 +225,33 @@ export default function AnalyticsPage() {
         )}
       </Section>
 
+      {/* SUBJECT PERFORMANCE */}
+      {sp.length > 0 && (
+        <Section title="Subject performance">
+          <Card title="Average & pass rate by subject">
+            <div className="space-y-2.5">
+              {sp.map((s) => (
+                <div key={s.subject} className="flex items-center gap-3">
+                  <span className="w-28 shrink-0 text-sm truncate" title={s.subject}>{s.subject}</span>
+                  <div className="flex-1">
+                    <BarRow label="" value={s.average ?? 0} max={maxSubjAvg}
+                            color={(s.average ?? 0) >= 50 ? C.ledger : (s.average ?? 0) >= 40 ? C.brass : C.sanction} />
+                  </div>
+                  <span className="w-12 shrink-0 text-right tabular text-sm font-medium">{s.average ?? "—"}</span>
+                  <span className="w-20 shrink-0 text-right tabular text-xs text-ink-soft">
+                    {s.pass_rate === null ? "—" : `${s.pass_rate}% pass`}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-ink-soft mt-3">
+              Average total (out of 100) per subject this term, across {sp.reduce((n, s) => n + s.results, 0)} results.
+              Red = below 40, amber = 40–49, green = 50+.
+            </p>
+          </Card>
+        </Section>
+      )}
+
       {/* FINANCE */}
       <Section title="Fees & finance">
         <div className="grid md:grid-cols-3 gap-3">
@@ -247,6 +281,29 @@ export default function AnalyticsPage() {
           <Kpi label="Average score" value={cbt.average_percent === null ? "—" : `${cbt.average_percent}%`}
                accent={cbt.average_percent !== null && cbt.average_percent >= 50 ? C.ledger : C.brass} />
         </div>
+      </Section>
+
+      {/* ATTENDANCE */}
+      <Section title="Attendance">
+        {at.total > 0 ? (
+          <div className="grid md:grid-cols-3 gap-3">
+            <Card title="Attendance rate" className="grid place-items-center">
+              <ProgressRing value={at.rate} label={`${(at.present + at.late).toLocaleString()} of ${at.total.toLocaleString()} marks`}
+                            sub="in school" color={at.rate !== null && at.rate >= 85 ? C.ledger : at.rate !== null && at.rate >= 70 ? C.brass : C.sanction} />
+            </Card>
+            <Card title="Present · late · absent" className="md:col-span-2">
+              <Donut centerSub="marks" data={[
+                { label: "Present", value: at.present, color: C.ledger },
+                { label: "Late", value: at.late, color: C.brass },
+                { label: "Absent", value: at.absent, color: C.sanction },
+              ]} />
+            </Card>
+          </div>
+        ) : (
+          <Card title="Attendance rate">
+            <p className="text-sm text-ink-soft">No attendance has been marked yet.</p>
+          </Card>
+        )}
       </Section>
     </div>
   );
