@@ -211,7 +211,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <div className="min-h-screen md:flex bg-paper">
       {/* ---- desktop sidebar ---- */}
       <aside
-        className="hidden md:flex md:flex-col shrink-0 bg-ink text-white transition-[width] duration-200 ease-out"
+        className="hidden md:flex md:flex-col shrink-0 self-start sticky top-0 h-screen bg-ink text-white transition-[width] duration-200 ease-out"
         style={{ width: collapsed ? 72 : 244 }}
       >
         <div className={`flex items-center gap-2 py-5 ${collapsed ? "justify-center px-2" : "px-5"}`}>
