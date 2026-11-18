@@ -10,7 +10,7 @@ import io
 from datetime import date, datetime
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.academics import SchoolClass, ClassArm, ClassCategory
+from app.models.academics import SchoolClass, ClassArm, ClassCategory, infer_level
 from app.models.student import Student, Gender
 from app.services.audit import record_audit
 
@@ -73,14 +73,12 @@ def _parse_date(raw: str) -> date | None:
 
 
 def _infer_category(class_name: str) -> tuple[ClassCategory, int]:
-    """Guess junior/senior and a level order from a Nigerian class name."""
-    up = class_name.upper().replace(" ", "")
-    digit = next((int(c) for c in up if c.isdigit()), 0)
-    if up.startswith("JSS") or up.startswith("JS"):
-        return ClassCategory.JUNIOR, digit
-    if up.startswith("SSS") or up.startswith("SS"):
-        return ClassCategory.SENIOR, 3 + digit
-    return ClassCategory.JUNIOR, digit
+    """Guess (category, level_order) from a Nigerian class name.
+
+    Thin wrapper over the canonical inference so the importer and quick-setup
+    stay in step (nursery/primary/junior/senior + the UBE 'Basic' scale).
+    """
+    return infer_level(class_name)
 
 
 async def _resolve_arm(db, school_id, class_name, arm_name, auto_create, cache):

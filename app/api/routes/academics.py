@@ -4,7 +4,9 @@ subject). Any authenticated user of the school can read these.
 from fastapi import APIRouter
 from sqlalchemy import select
 from app.core.deps import DbDep, CurrentUser, tenant_scope
-from app.models.academics import AcademicSession, Term, SchoolClass, ClassArm, Subject
+from app.models.academics import (
+    AcademicSession, Term, SchoolClass, ClassArm, Subject, infer_level,
+)
 
 router = APIRouter(prefix="/api/academics", tags=["academics"])
 
@@ -125,8 +127,11 @@ async def create_term(payload: TermIn, db: DbDep,
 async def create_class(payload: ClassIn, db: DbDep,
                        user: Annotated[User, AdminOnly]):
     school_id = tenant_scope(user)
+    # when the admin doesn't set an explicit order, derive one from the name so
+    # the promotion ladder sorts correctly across levels (primary → JSS → SS)
+    order = payload.level_order or infer_level(payload.name)[1]
     obj = SchoolClass(school_id=school_id, name=payload.name,
-                      category=payload.category, level_order=payload.level_order,
+                      category=payload.category, level_order=order,
                       created_by=user.id)
     db.add(obj)
     await db.commit()
@@ -187,10 +192,10 @@ async def quick_setup(payload: QuickSetupIn, db: DbDep,
     db.add(term)
 
     created_classes = []
-    for i, cname in enumerate(payload.classes):
-        category = "senior" if cname.upper().startswith("SS") else "junior"
+    for cname in payload.classes:
+        category, order = infer_level(cname)
         klass = SchoolClass(school_id=school_id, name=cname, category=category,
-                            level_order=i + 1, created_by=user.id)
+                            level_order=order, created_by=user.id)
         db.add(klass)
         await db.flush()
         for aname in payload.arms:
