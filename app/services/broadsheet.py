@@ -16,7 +16,7 @@ from collections import defaultdict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.school import School
+from app.models.school import School, bands_for_category
 from app.models.student import Student
 from app.models.academics import Term, ClassArm, SchoolClass, Subject, AcademicSession
 from app.models.results import SubjectResult, TermResult
@@ -35,7 +35,8 @@ async def build_term_broadsheet(db: AsyncSession, school_id: str,
     term = await db.get(Term, term_id)
     session = await db.get(AcademicSession, term.session_id) if term else None
     school = await db.get(School, school_id)
-    bands = (school.grading_config or {}).get("bands", []) if school else []
+    bands = bands_for_category(school.grading_config if school else None,
+                               klass.category if klass else None)
 
     students = (await db.execute(select(Student).where(
         Student.school_id == school_id,

@@ -49,6 +49,8 @@ export default function SetupPage() {
   const [newPsy, setNewPsy] = useState("");
   const [gbands, setGbands] = useState<{ grade: string; min: number; remark: string }[]>([]);
   const [gIsWaec, setGIsWaec] = useState(true);
+  const [pbands, setPbands] = useState<{ grade: string; min: number; remark: string }[]>([]);
+  const [pIsCustom, setPIsCustom] = useState(false);
   const [bank, setBank] = useState<CommentBankEntry[]>([]);
   const [newComment, setNewComment] = useState<{ text: string; min: string; max: string; audience: "form_teacher" | "principal" }>(
     { text: "", min: "0", max: "100", audience: "form_teacher" });
@@ -238,9 +240,14 @@ export default function SetupPage() {
 
   const loadGrading = useCallback(async () => {
     try {
-      const g = await api<{ bands: { grade: string; min: number; remark: string }[]; is_waec: boolean }>("/api/schools/me/grading");
+      const g = await api<{
+        bands: { grade: string; min: number; remark: string }[]; is_waec: boolean;
+        primary_bands: { grade: string; min: number; remark: string }[]; primary_is_custom: boolean;
+      }>("/api/schools/me/grading");
       setGbands(g.bands.map((b) => ({ grade: b.grade, min: b.min, remark: b.remark })));
       setGIsWaec(g.is_waec);
+      setPbands((g.primary_bands || []).map((b) => ({ grade: b.grade, min: b.min, remark: b.remark })));
+      setPIsCustom(g.primary_is_custom);
     } catch { /* non-fatal */ }
   }, []);
   useEffect(() => { loadGrading(); }, [loadGrading]);
@@ -252,6 +259,39 @@ export default function SetupPage() {
   }
   function addBand() { setGbands((bs) => [...bs, { grade: "", min: 0, remark: "" }]); }
   function removeBand(i: number) { setGbands((bs) => bs.filter((_, j) => j !== i)); }
+
+  function editPBand(i: number, key: "grade" | "min" | "remark", value: string) {
+    setPbands((bs) => bs.map((b, j) => j === i
+      ? { ...b, [key]: key === "min" ? (Number(value.replace(/[^0-9]/g, "")) || 0) : value }
+      : b));
+  }
+  function addPBand() { setPbands((bs) => [...bs, { grade: "", min: 0, remark: "" }]); }
+  function removePBand(i: number) { setPbands((bs) => bs.filter((_, j) => j !== i)); }
+
+  async function resetPrimaryGrading() {
+    setBusy("pgrading");
+    try {
+      await api("/api/schools/me/grading/primary/reset", { method: "POST" });
+      await loadGrading();
+      toast.ok("Primary grading reset to the default scale.");
+    } catch { toast.err("Could not reset the primary grading scale."); }
+    finally { setBusy(null); }
+  }
+  async function savePrimaryGrading() {
+    const bands = pbands.map((b) => ({ grade: b.grade.trim(), min: b.min, remark: b.remark.trim() }))
+                        .filter((b) => b.grade);
+    if (bands.length === 0) { toast.err("Add at least one grade band."); return; }
+    if (!bands.some((b) => b.min === 0)) { toast.err("The lowest band must start at 0."); return; }
+    const mins = bands.map((b) => b.min);
+    if (new Set(mins).size !== mins.length) { toast.err("Two bands cannot start at the same score."); return; }
+    setBusy("pgrading");
+    try {
+      await api("/api/schools/me/grading/primary", { method: "PUT", body: JSON.stringify({ bands }) });
+      await loadGrading();
+      toast.ok("Primary grading scale saved.");
+    } catch (e) { toast.err(e instanceof ApiError ? e.message : "Could not save the primary grading scale."); }
+    finally { setBusy(null); }
+  }
 
   async function useWaec() {
     setBusy("grading");
@@ -280,6 +320,8 @@ export default function SetupPage() {
 
   // sorted high -> low with derived upper bound, for display
   const gradingRows = [...gbands.map((b, i) => ({ ...b, i }))].sort((a, b) => b.min - a.min)
+    .map((b, idx, arr) => ({ ...b, max: idx === 0 ? 100 : arr[idx - 1].min - 1 }));
+  const primaryRows = [...pbands.map((b, i) => ({ ...b, i }))].sort((a, b) => b.min - a.min)
     .map((b, idx, arr) => ({ ...b, max: idx === 0 ? 100 : arr[idx - 1].min - 1 }));
 
   async function saveTraits(next: string[]) {
@@ -927,6 +969,78 @@ export default function SetupPage() {
               <button onClick={useWaec} disabled={busy === "grading"}
                       className="rounded-md border border-ink text-ink px-3 py-1.5 text-sm font-medium hover:bg-ink hover:text-white disabled:opacity-50">
                 Reset to WAEC standard
+              </button>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* primary & nursery grading */}
+      {school && (
+        <section className="rounded-lg border border-line bg-card p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+            <p className="text-sm font-medium">Primary &amp; nursery grading</p>
+            <span className={`text-xs rounded-full px-2.5 py-0.5 ${pIsCustom ? "bg-brass/15 text-brass-ink" : "bg-ledger/10 text-ledger"}`}>
+              {pIsCustom ? "Custom" : "Default scale"}
+            </span>
+          </div>
+          <p className="text-xs text-ink-soft mb-3">
+            Nursery and primary classes are graded on this simpler scale (e.g. A–F
+            with descriptive remarks) instead of the WAEC codes above — secondary
+            classes keep the WAEC scale. Changing this applies the next time results
+            are computed.
+          </p>
+
+          <div className="overflow-x-auto rounded-lg border border-line">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-ink text-white text-left">
+                  <th className="px-3 py-2 font-medium">Grade</th>
+                  <th className="px-3 py-2 font-medium">From (%)</th>
+                  <th className="px-3 py-2 font-medium">Range</th>
+                  <th className="px-3 py-2 font-medium">Remark</th>
+                  <th className="px-2 py-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {primaryRows.map((b) => (
+                  <tr key={b.i} className="border-t border-line">
+                    <td className="px-3 py-1.5">
+                      <input value={b.grade} onChange={(e) => editPBand(b.i, "grade", e.target.value)}
+                             placeholder="A" maxLength={6}
+                             className="w-16 rounded border border-line px-2 py-1 text-sm" />
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <input value={String(b.min)} onChange={(e) => editPBand(b.i, "min", e.target.value)}
+                             inputMode="numeric"
+                             className="w-16 rounded border border-line px-2 py-1 text-sm tabular" />
+                    </td>
+                    <td className="px-3 py-1.5 tabular text-ink-soft">{b.min}–{b.max}</td>
+                    <td className="px-3 py-1.5">
+                      <input value={b.remark} onChange={(e) => editPBand(b.i, "remark", e.target.value)}
+                             placeholder="e.g. Very Good" maxLength={40}
+                             className="w-full min-w-[7rem] rounded border border-line px-2 py-1 text-sm" />
+                    </td>
+                    <td className="px-2 py-1.5 text-right">
+                      <button onClick={() => removePBand(b.i)} aria-label={`Remove ${b.grade}`}
+                              className="text-sanction text-xs hover:underline">Remove</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button onClick={addPBand} className="rounded-md border border-line px-3 py-1.5 text-sm font-medium hover:border-ink">+ Add band</button>
+            <button onClick={savePrimaryGrading} disabled={busy === "pgrading"}
+                    className="rounded-md bg-ink text-white px-4 py-1.5 text-sm font-medium hover:bg-ink-soft disabled:opacity-50">
+              {busy === "pgrading" ? "Saving…" : "Save primary scale"}
+            </button>
+            {pIsCustom && (
+              <button onClick={resetPrimaryGrading} disabled={busy === "pgrading"}
+                      className="rounded-md border border-ink text-ink px-3 py-1.5 text-sm font-medium hover:bg-ink hover:text-white disabled:opacity-50">
+                Reset to default scale
               </button>
             )}
           </div>
