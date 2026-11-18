@@ -19,6 +19,8 @@ from app.services.report import build_report_data
 from app.services.report_pdf import build_report_pdf
 from app.services.annual import build_annual_broadsheet, build_annual_report_data
 from app.services.annual_pdf import build_annual_pdf
+from app.services.broadsheet import build_term_broadsheet
+from app.services.broadsheet_pdf import build_broadsheet_pdf
 from app.services.audit import record_audit
 from app.services.teaching import assert_may_touch_scores
 
@@ -575,6 +577,28 @@ async def class_report_cards_pdf(
     out.seek(0)
     return StreamingResponse(out, media_type="application/pdf", headers={
         "Content-Disposition": f'inline; filename="report_cards_{included}.pdf"'})
+
+
+@router.get("/score-sheet.pdf", tags=["results"])
+async def class_score_sheet_pdf(
+    db: DbDep,
+    user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN, Role.PRINCIPAL, Role.TEACHER))],
+    arm_id: str = Query(...),
+    term_id: str = Query(...),
+):
+    """One term's class score sheet — every student against every subject, with
+    totals, average, grade and position — as a single landscape PDF for the
+    staff room wall or the records file."""
+    school_id = tenant_scope(user)
+    data = await build_term_broadsheet(db, school_id, arm_id, term_id)
+    if not data["subjects"]:
+        raise HTTPException(status_code=404,
+                            detail="No computed results in this class for the term yet.")
+    pdf = build_broadsheet_pdf(data)
+    cls = (data["class"] or "class").replace(" ", "_")
+    fname = f"score_sheet_{cls}_{data['term'] or 'term'}.pdf".lower()
+    return StreamingResponse(BytesIO(pdf), media_type="application/pdf",
+                             headers={"Content-Disposition": f'inline; filename="{fname}"'})
 
 
 @router.get("/report/{student_id}/pdf", tags=["results"])
