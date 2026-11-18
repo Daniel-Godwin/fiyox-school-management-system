@@ -356,6 +356,14 @@ export default function ResultsPage() {
             )}
 
             {hasRows && (
+              <button onClick={() => openPdf(`/api/score-sheet.pdf?arm_id=${armId}&term_id=${termId}`)}
+                      disabled={busy !== null}
+                      className="rounded-md border border-brass text-brass-ink px-4 py-2 text-sm font-medium hover:bg-brass hover:text-white disabled:opacity-40">
+                Print score sheet
+              </button>
+            )}
+
+            {hasRows && (
               <button onClick={() => openGrid("affective")} disabled={busy !== null}
                       className="rounded-md border border-ink text-ink px-4 py-2 text-sm font-medium hover:bg-ink hover:text-white disabled:opacity-40">
                 {busy === "grid-load" ? "Loading…" : "Rate character"}
