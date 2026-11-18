@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select, func
 from app.core.deps import DbDep, require_roles
 from app.core.security import hash_password, create_access_token
-from app.models.school import School, User, Role, DEFAULT_GRADING
+from app.models.school import School, User, Role, DEFAULT_GRADING, PRIMARY_GRADING_BANDS
 from app.schemas import SchoolCreate, SchoolOut
 from app.services.audit import record_audit
 import secrets as _secrets
@@ -236,9 +236,14 @@ async def get_grading(db: DbDep, user: Annotated[User, Depends(require_roles(
     school = await db.get(School, school_id)
     if not school:
         raise HTTPException(404, "School not found")
-    bands = (school.grading_config or {}).get("bands", []) or DEFAULT_GRADING["bands"]
+    cfg = school.grading_config or {}
+    bands = cfg.get("bands", []) or DEFAULT_GRADING["bands"]
+    primary = cfg.get("primary_bands") or PRIMARY_GRADING_BANDS
     return {"bands": _bands_with_ranges(bands), "is_waec": _is_waec(bands),
-            "waec": _bands_with_ranges(DEFAULT_GRADING["bands"])}
+            "waec": _bands_with_ranges(DEFAULT_GRADING["bands"]),
+            "primary_bands": _bands_with_ranges(primary),
+            "primary_is_custom": bool(cfg.get("primary_bands")),
+            "primary_default": _bands_with_ranges(PRIMARY_GRADING_BANDS)}
 
 
 @router.put("/me/grading", tags=["schools"])
@@ -285,6 +290,59 @@ async def reset_grading(request: Request, db: DbDep,
     school.updated_by = user.id
     await db.commit()
     return {"bands": _bands_with_ranges(cfg["bands"]), "is_waec": True}
+
+
+def _clean_bands(payload_bands) -> list[dict]:
+    """Validate and normalise a set of grade bands (shared by main & primary)."""
+    bands = [{"grade": b.grade.strip(), "min": b.min, "remark": b.remark.strip()}
+             for b in payload_bands]
+    mins = [b["min"] for b in bands]
+    if len(set(mins)) != len(mins):
+        raise HTTPException(422, "Two bands cannot start at the same score")
+    if min(mins) != 0:
+        raise HTTPException(422, "The lowest band must start at 0 so every score has a grade")
+    if any(not b["grade"] for b in bands):
+        raise HTTPException(422, "Every band needs a grade label")
+    return sorted(bands, key=lambda b: b["min"], reverse=True)
+
+
+@router.put("/me/grading/primary", tags=["schools"])
+async def set_primary_grading(payload: GradingBandsIn, request: Request, db: DbDep,
+                              user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN))]):
+    """Set the grade scale used for nursery & primary classes (secondary classes
+    keep the main WAEC-style bands)."""
+    school_id = tenant_scope(user)
+    school = await db.get(School, school_id)
+    if not school:
+        raise HTTPException(404, "School not found")
+    bands = _clean_bands(payload.bands)
+    cfg = _copy.deepcopy(school.grading_config or DEFAULT_GRADING)
+    cfg["primary_bands"] = bands
+    school.grading_config = cfg
+    school.updated_by = user.id
+    await record_audit(db, school_id=school_id, user_id=user.id, action="update",
+                       table_name="schools", record_id=school.id,
+                       changes={"primary_grading_bands": {"new": len(bands)}},
+                       ip_address=request.client.host if request.client else None)
+    await db.commit()
+    return {"primary_bands": _bands_with_ranges(bands), "primary_is_custom": True}
+
+
+@router.post("/me/grading/primary/reset", tags=["schools"])
+async def reset_primary_grading(request: Request, db: DbDep,
+                                user: Annotated[User, Depends(require_roles(Role.SCHOOL_ADMIN))]):
+    """Restore the default nursery/primary grade scale."""
+    school_id = tenant_scope(user)
+    school = await db.get(School, school_id)
+    if not school:
+        raise HTTPException(404, "School not found")
+    cfg = _copy.deepcopy(school.grading_config or DEFAULT_GRADING)
+    cfg.pop("primary_bands", None)                 # fall back to the default scale
+    school.grading_config = cfg
+    school.updated_by = user.id
+    await db.commit()
+    return {"primary_bands": _bands_with_ranges(PRIMARY_GRADING_BANDS),
+            "primary_is_custom": False}
 
 
 # ---------- Branding assets (logo, signature, stamp) ----------

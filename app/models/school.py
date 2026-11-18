@@ -35,6 +35,32 @@ DEFAULT_GRADING = {
     ],
 }
 
+# Primary & nursery pupils are graded on a simpler descriptive scale rather than
+# the WAEC A1-F9 codes. A primary/nursery class uses these unless the school has
+# set its own `primary_bands`; secondary classes always use `bands` above.
+PRIMARY_GRADING_BANDS = [
+    {"min": 80, "grade": "A", "remark": "Excellent"},
+    {"min": 70, "grade": "B", "remark": "Very Good"},
+    {"min": 60, "grade": "C", "remark": "Good"},
+    {"min": 50, "grade": "D", "remark": "Fair"},
+    {"min": 40, "grade": "E", "remark": "Pass"},
+    {"min": 0, "grade": "F", "remark": "Needs Improvement"},
+]
+
+
+def bands_for_category(grading_config: dict | None, category) -> list[dict]:
+    """The grade bands that apply to a class of this category.
+
+    Nursery/primary classes use the school's `primary_bands` if set, else the
+    sensible primary default; every other class uses the main `bands` (WAEC by
+    default). `category` may be a ClassCategory or its string value.
+    """
+    cfg = grading_config or {}
+    cat = str(getattr(category, "value", category) or "").lower()
+    if cat in ("nursery", "primary"):
+        return cfg.get("primary_bands") or PRIMARY_GRADING_BANDS
+    return cfg.get("bands") or DEFAULT_GRADING["bands"]
+
 
 class School(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "schools"

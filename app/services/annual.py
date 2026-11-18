@@ -15,7 +15,7 @@ from collections import defaultdict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.school import School
+from app.models.school import School, bands_for_category
 from app.models.student import Student
 from app.models.academics import (
     Term, ClassArm, SchoolClass, Subject, AcademicSession,
@@ -114,7 +114,7 @@ async def build_annual_report_data(db: AsyncSession, school_id: str,
     klass = await db.get(SchoolClass, arm.class_id)
     school = await db.get(School, school_id)
     session = await db.get(AcademicSession, session_id)
-    bands = (school.grading_config or {}).get("bands", [])
+    bands = bands_for_category(school.grading_config, klass.category if klass else None)
 
     terms = await session_terms(db, school_id, session_id)
     term_ids = [t.id for t in terms]

@@ -7,7 +7,8 @@ average and overall position. Uses competition ranking (1, 2, 2, 4) for ties.
 from collections import defaultdict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.school import School
+from app.models.school import School, bands_for_category
+from app.models.academics import ClassArm, SchoolClass
 from app.models.student import Student
 from app.models.results import (
     AssessmentComponent, ScoreEntry, SubjectResult, TermResult,
@@ -38,7 +39,11 @@ def rank(pairs: list[tuple[str, float]]) -> dict[str, int]:
 
 async def compute_term(db: AsyncSession, school_id: str, arm_id: str, term_id: str) -> dict:
     school = await db.get(School, school_id)
-    bands = (school.grading_config or {}).get("bands", [])
+    # grade on the scale that fits the class level (primary vs secondary)
+    arm = await db.get(ClassArm, arm_id)
+    klass = await db.get(SchoolClass, arm.class_id) if arm else None
+    bands = bands_for_category(school.grading_config if school else None,
+                               klass.category if klass else None)
 
     # component id -> name, for the report-card breakdown
     comps = (await db.execute(

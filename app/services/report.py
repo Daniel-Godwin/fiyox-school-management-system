@@ -5,7 +5,7 @@ always show identical numbers.
 """
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.school import School
+from app.models.school import School, bands_for_category
 from app.models.student import Student
 from app.models.academics import Term, ClassArm, SchoolClass, Subject, AcademicSession
 from app.models.results import AssessmentComponent, SubjectResult, TermResult
@@ -181,7 +181,8 @@ async def build_report_data(db: AsyncSession, school_id: str,
         "term": {"name": term.name if term else "",
                  "next_term_begins": str(term.next_term_begins) if term and term.next_term_begins else None},
         "components": [{"name": c.name, "max": c.max_score} for c in components],
-        "grading_key": _grading_key((school.grading_config or {}).get("bands", [])),
+        "grading_key": _grading_key(bands_for_category(
+            school.grading_config, klass.category if klass else None)),
         "subjects": rows,
         "summary": {"grand_total": tr.grand_total, "average": tr.average,
                     "subjects_count": tr.subjects_count,
