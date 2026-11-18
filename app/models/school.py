@@ -77,6 +77,10 @@ class School(Base, UUIDMixin, TimestampMixin):
     # parents only see "Pay online" when the school has switched it on; pilots
     # start with it off until the school is ready for live payments
     online_payments_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # automatic SMS/email to a student's parent when a term result is published
+    # or a fee payment is recorded. On by default; a school can switch it off
+    # (e.g. to control SMS cost) from settings.
+    parent_notifications_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
