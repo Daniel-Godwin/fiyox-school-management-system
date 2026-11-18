@@ -1169,8 +1169,10 @@ export default function SetupPage() {
             <select value={newClass.category}
                     onChange={(e) => setNewClass({ ...newClass, category: e.target.value })}
                     className="rounded border border-line px-2 py-1.5 text-sm bg-white">
-              <option value="junior">Junior</option>
-              <option value="senior">Senior</option>
+              <option value="nursery">Nursery / KG</option>
+              <option value="primary">Primary</option>
+              <option value="junior">Junior (JSS)</option>
+              <option value="senior">Senior (SS)</option>
             </select>
             <button onClick={addClass} disabled={busy !== null}
                     className="rounded-md border border-ink text-ink px-3 py-1.5 text-xs font-medium hover:bg-ink hover:text-white disabled:opacity-40">
