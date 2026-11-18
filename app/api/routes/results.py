@@ -21,6 +21,8 @@ from app.services.annual import build_annual_broadsheet, build_annual_report_dat
 from app.services.annual_pdf import build_annual_pdf
 from app.services.broadsheet import build_term_broadsheet
 from app.services.broadsheet_pdf import build_broadsheet_pdf
+from app.services.parent_notify import notify_result_published
+from app.models.academics import Term
 from app.services.audit import record_audit
 from app.services.teaching import assert_may_touch_scores
 
@@ -432,6 +434,7 @@ async def publish_results(
 
     results = await _arm_term_results(db, school_id, payload.arm_id, payload.term_id)
     published = already = blocked = 0
+    published_ids: list[str] = []
     for tr in results:
         if tr.is_published:
             already += 1
@@ -447,9 +450,24 @@ async def publish_results(
         tr.is_published = True
         tr.updated_by = user.id
         published += 1
+        published_ids.append(tr.student_id)
     await db.commit()
+
     result = {"published": published, "already_published": already,
               "blocked_unapproved": blocked}
+
+    # tell each newly-published student's parent their result is out
+    if published_ids:
+        term = await db.get(Term, payload.term_id)
+        term_label = f"{str(term.name).split('.')[-1].title()} term" if term else ""
+        names = {s.id: f"{s.first_name} {s.last_name}" for s in (await db.execute(
+            select(Student).where(Student.id.in_(published_ids)))).scalars().all()}
+        notice = await notify_result_published(
+            db, school_id=school_id, students=names, term_label=term_label,
+            created_by=user.id)
+        await db.commit()
+        result["parents_notified"] = notice["notified"]
+
     if blocked and not published:
         result["note"] = ("These results are not approved yet. The principal must "
                           "approve them before they can be published.")

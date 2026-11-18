@@ -22,6 +22,7 @@ type SchoolSettings = {
   withhold_results_on_debt: boolean;
   result_approval_required: boolean;
   online_payments_enabled: boolean;
+  parent_notifications_enabled: boolean;
   affective_traits: string[];
   psychomotor_traits: string[];
   admission_prefix: string | null;
@@ -391,6 +392,25 @@ export default function SetupPage() {
       await load();
     } catch (e) {
       setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not save the policy." });
+    } finally { setBusy(null); }
+  }
+
+  async function toggleParentNotifications(next: boolean) {
+    setBusy("parentnotif"); setNotice(null);
+    try {
+      await api("/api/schools/me", {
+        method: "PATCH",
+        body: JSON.stringify({ parent_notifications_enabled: next }),
+      });
+      setNotice({
+        kind: "ok",
+        text: next
+          ? "Parent notifications are ON — a parent is messaged when a result is published or a payment is recorded."
+          : "Parent notifications are OFF — results and payments are no longer announced to parents automatically.",
+      });
+      await load();
+    } catch (e) {
+      setNotice({ kind: "err", text: e instanceof ApiError ? e.message : "Could not change the setting." });
     } finally { setBusy(null); }
   }
 
@@ -812,6 +832,30 @@ export default function SetupPage() {
           {school.result_approval_required && (
             <p className="mt-2 text-xs text-brass-ink bg-brass/15 rounded px-2 py-1 inline-block">
               Results pass through the approval gate before publishing.
+            </p>
+          )}
+
+          <label className="flex items-start gap-3 cursor-pointer mt-4 pt-4 border-t border-line">
+            <input
+              type="checkbox"
+              checked={school.parent_notifications_enabled}
+              disabled={busy !== null}
+              onChange={(e) => toggleParentNotifications(e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-[color:var(--ink,#0B2239)]"
+            />
+            <span className="text-sm">
+              Notify parents of results and payments
+              <span className="block text-xs text-ink-soft mt-0.5">
+                When on, a student&apos;s parent is messaged automatically (SMS and/or
+                email, by what&apos;s on file) the moment a term result is published or a
+                fee payment is recorded. Every message is saved in the delivery log.
+                Turn it off to control SMS cost.
+              </span>
+            </span>
+          </label>
+          {!school.parent_notifications_enabled && (
+            <p className="mt-2 text-xs text-ink-soft bg-ink/5 rounded px-2 py-1 inline-block">
+              Automatic parent notifications are off.
             </p>
           )}
         </section>

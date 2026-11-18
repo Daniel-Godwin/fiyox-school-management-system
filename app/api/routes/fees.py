@@ -11,6 +11,7 @@ from app.models.school import School, User, Role
 from app.models.notifications import MessagePurpose
 from app.models.student import Student
 from app.services.notify import send_email_and_log
+from app.services.parent_notify import notify_payment_received
 from app.models.fees import (
     FeeCategory, FeeStructure, Invoice, Payment, InvoiceStatus,
 )
@@ -140,6 +141,18 @@ async def pay(
         ip=request.client.host if request.client else None)
     if err:
         raise HTTPException(status_code=404, detail=err)
+
+    # confirm the payment to the student's parent (best-effort; the payment is
+    # already committed inside record_payment)
+    inv = res.get("invoice") or {}
+    if inv.get("student_id") and not res.get("duplicate"):
+        notice = await notify_payment_received(
+            db, school_id=school_id, student_id=inv["student_id"],
+            amount=float(payload.amount), balance=float(inv.get("balance", 0) or 0),
+            invoice_number=inv.get("invoice_number", ""),
+            payment_id=res.get("payment_id"), created_by=user.id)
+        await db.commit()
+        res["parent_notified"] = bool(notice.get("notified"))
     return res
 
 

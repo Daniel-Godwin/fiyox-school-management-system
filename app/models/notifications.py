@@ -21,6 +21,7 @@ class MessagePurpose(str, enum.Enum):
     ANNOUNCEMENT = "announcement"
     FEE_REMINDER = "fee_reminder"
     RESULT_PUBLISHED = "result_published"
+    PAYMENT_RECEIVED = "payment_received"
     CUSTOM = "custom"
 
 
